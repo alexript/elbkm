@@ -94,8 +94,9 @@ are demoted to messages and do not interrupt the user's flow."
   "When non-nil, `elbkm-search' shows results in a dedicated buffer.
 The buffer, named `*elbkm-search*', uses `tabulated-list-mode' so it
 behaves like `*Packages*' from `M-x list-packages': RET on an entry
-opens the bookmark URL via `elbkm-open-function'; `g' refreshes the
-buffer from storage; `q' buries the window.
+opens the bookmark URL via `elbkm-open-function'; `a' adds a bookmark;
+`d' deletes the bookmark at point after confirmation; `g' refreshes the
+buffer from storage; and `q' buries the window.
 When this option is nil, `elbkm-search' uses `completing-read' as
 before."
   :type 'boolean)
@@ -264,7 +265,8 @@ URL with `elbkm-open-function' (by default `browse-url').
 When `elbkm-use-list-buffer' is non-nil, results are shown in the
 dedicated `*elbkm-search*' buffer instead, using `tabulated-list-mode'
 (similar to `*Packages*' from `M-x list-packages').  In that buffer,
-RET opens the entry at point via `elbkm-open-function', `g' reloads
+RET opens the entry at point via `elbkm-open-function', `a' adds a
+bookmark, `d' deletes the entry at point after confirmation, `g' reloads
 from storage, and `q' buries the window.
 
 When called from Lisp, TAGS may be a list of strings or a comma-separated
@@ -302,14 +304,17 @@ resolved from the ID returned by `tabulated-list-get-id'.")
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "RET") #'elbkm-search-list--open)
+    (define-key map (kbd "a") #'elbkm-search-list--add)
+    (define-key map (kbd "d") #'elbkm-search-list--delete)
     map)
   "Keymap for `elbkm-search-list-mode'.")
 
 (define-derived-mode elbkm-search-list-mode tabulated-list-mode "elbkm-search"
   "Major mode for browsing elbkm search results.
 Inherits from `tabulated-list-mode'.  RET opens the bookmark at point
-via `elbkm-open-function'; `g' reloads the buffer from storage; `q'
-buries the window."
+via `elbkm-open-function'; `a' adds a bookmark; `d' deletes the bookmark
+at point after confirmation; `g' reloads the buffer from storage; and
+`q' buries the window."
   (setq tabulated-list-format
         [("Title" 40 t)
          ("URL" 50 t)
@@ -351,6 +356,21 @@ TAGS is a list of tag strings or nil (no filter)."
       (cl-find-if (lambda (b) (equal (elbkm-bookmark-id b) id))
                   elbkm-search-list--entries))))
 
+(defun elbkm-search-list--add ()
+  "Add a bookmark, then refresh the search list buffer."
+  (interactive)
+  (elbkm-add)
+  (elbkm-search-list--populate elbkm-search-list--tags))
+
+(defun elbkm-search-list--delete ()
+  "Delete the bookmark at point, then refresh the search list buffer."
+  (interactive)
+  (let ((bm (elbkm-search-list--bookmark-at-point)))
+    (unless bm
+      (user-error "No bookmark at point"))
+    (when (elbkm-delete nil bm)
+      (elbkm-search-list--populate elbkm-search-list--tags))))
+
 (defun elbkm-search-list--open ()
   "Open the bookmark at point via `elbkm-open-function'."
   (interactive)
@@ -376,22 +396,27 @@ and activates `elbkm-search-list-mode'.  Returns the buffer."
     buf))
 
 ;;;###autoload
-(defun elbkm-delete (&optional tags)
+(defun elbkm-delete (&optional tags bookmark)
   "Search bookmarks and delete the selected one.
 
 Interactively, prompt for optional comma-separated TAGS to filter the
 candidate list, select a bookmark with `completing-read', show its details
 and ask for confirmation before deleting it.
 
+When BOOKMARK is non-nil, delete that bookmark directly after asking for
+confirmation.  This is used by the list-buffer command.
+
 When called from Lisp, TAGS may be a list of strings or a comma-separated
 string.  Pass nil to consider all bookmarks.
 
 Return t if a bookmark was deleted, nil otherwise."
   (interactive)
-  (let* ((tags (elbkm--normalize-tags (or tags (elbkm--read-tags))))
-         (bookmarks (elbkm-storage-list))
-         (filtered (elbkm--filter-by-tags bookmarks tags))
-         (bm (elbkm--select-bookmark filtered)))
+  (let* ((tags (unless bookmark
+                 (elbkm--normalize-tags (or tags (elbkm--read-tags)))))
+         (bookmarks (unless bookmark (elbkm-storage-list)))
+         (filtered (unless bookmark
+                     (elbkm--filter-by-tags bookmarks tags)))
+         (bm (or bookmark (elbkm--select-bookmark filtered))))
     (cond
      ((null bm)
       (message "Deletion cancelled.")

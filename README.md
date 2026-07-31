@@ -117,8 +117,10 @@ similar to `*Packages*` from `M-x list-packages`:
 (custom-set-variables '(elbkm-use-list-buffer t))
 ```
 
-In that buffer: `RET` opens the entry at point, `g` reloads from storage,
-`q` buries the window.
+In that buffer: `RET` opens the entry at point, `a` adds a new bookmark,
+`d` deletes the entry at point after confirmation, `g` reloads from storage,
+`q` buries the window.  The list is refreshed after a successful add or
+delete.
 
 ### Delete a bookmark
 

@@ -311,5 +311,53 @@ preserving the active tag filter."
        (should (equal opened-url "https://a.example"))
        (should (not (get-buffer "*elbkm-search*")))))))
 
+(ert-deftest elbkm-commands-test/search-list-keymap-binds-add-and-delete ()
+  "The search list binds `a' to add and `d' to delete."
+  (should (eq (lookup-key elbkm-search-list-mode-map (kbd "a"))
+             #'elbkm-search-list--add))
+  (should (eq (lookup-key elbkm-search-list-mode-map (kbd "d"))
+             #'elbkm-search-list--delete)))
+
+(ert-deftest elbkm-commands-test/search-list-add-refreshes-buffer ()
+  "Adding from the search list refreshes its entries."
+  (elbkm-commands-test--with-fresh-storage
+   (let ((elbkm-search-list--tags nil)
+         (elbkm-search-list--entries nil)
+         (buffer (get-buffer-create "*elbkm-search*")))
+     (unwind-protect
+         (with-current-buffer buffer
+           (elbkm-search-list-mode)
+           (elbkm-search-list--populate nil)
+           (cl-letf (((symbol-function 'elbkm-add)
+                      (lambda ()
+                        (elbkm-storage-add
+                         (elbkm-bookmark-create
+                          "https://a.example" "Alpha" "" nil)))))
+             (elbkm-search-list--add))
+           (should (= (length tabulated-list-entries) 1)))
+       (kill-buffer buffer)))))
+
+(ert-deftest elbkm-commands-test/search-list-delete-confirms-and-refreshes ()
+  "Deleting from the search list confirms and refreshes its entries."
+  (let ((bm (elbkm-bookmark-create "https://a.example" "Alpha" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((buffer (get-buffer-create "*elbkm-search*"))
+           (confirmation-calls 0))
+       (unwind-protect
+           (with-current-buffer buffer
+             (elbkm-search-list-mode)
+             (elbkm-search-list--populate nil)
+             (goto-char (point-min))
+             (cl-letf (((symbol-function 'y-or-n-p)
+                        (lambda (&rest _)
+                          (cl-incf confirmation-calls)
+                          t)))
+               (elbkm-search-list--delete))
+             (should (= confirmation-calls 1))
+             (should (= (length tabulated-list-entries) 0))
+             (should-not (elbkm-storage-list)))
+         (kill-buffer buffer))))))
+
 (provide 'elbkm-commands-test)
 ;;; elbkm-commands-test.el ends here
