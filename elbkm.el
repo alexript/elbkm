@@ -59,6 +59,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'tabulated-list)
 
 (require 'elbkm-bookmark)
 (require 'elbkm-storage)
@@ -88,6 +89,16 @@ Each function is called with one argument: the bookmark plist that was
 just removed from storage.  Use `add-hook' to register.  Errors in a hook
 are demoted to messages and do not interrupt the user's flow."
   :type 'hook)
+
+(defcustom elbkm-use-list-buffer nil
+  "When non-nil, `elbkm-search' shows results in a dedicated buffer.
+The buffer, named `*elbkm-search*', uses `tabulated-list-mode' so it
+behaves like `*Packages*' from `M-x list-packages': RET on an entry
+opens the bookmark URL via `elbkm-open-function'; `g' refreshes the
+buffer from storage; `q' buries the window.
+When this option is nil, `elbkm-search' uses `completing-read' as
+before."
+  :type 'boolean)
 
 (defvar elbkm-history nil
   "Minibuffer history for `elbkm' commands.")
@@ -250,22 +261,119 @@ Interactively, prompt for optional comma-separated TAGS used to filter the
 candidate list, then select a bookmark with `completing-read' and open its
 URL with `elbkm-open-function' (by default `browse-url').
 
+When `elbkm-use-list-buffer' is non-nil, results are shown in the
+dedicated `*elbkm-search*' buffer instead, using `tabulated-list-mode'
+(similar to `*Packages*' from `M-x list-packages').  In that buffer,
+RET opens the entry at point via `elbkm-open-function', `g' reloads
+from storage, and `q' buries the window.
+
 When called from Lisp, TAGS may be a list of strings or a comma-separated
 string.  Pass nil to search all bookmarks.
 
-Return the opened bookmark plist, or nil if the user cancelled."
+Return the opened bookmark plist, or nil if the user cancelled.
+When the list-buffer UI is active, return the buffer object instead."
   (interactive)
-  (let* ((tags (elbkm--normalize-tags (or tags (elbkm--read-tags))))
-         (bookmarks (elbkm-storage-list))
-         (filtered (elbkm--filter-by-tags bookmarks tags))
-         (bm (elbkm--select-bookmark filtered)))
-    (if bm
-        (progn
-          (funcall elbkm-open-function (elbkm-bookmark-url bm))
-          (message "Opening: %s" (elbkm-bookmark-url bm))
-          bm)
-      (message "Cancelled.")
-      nil)))
+  (let ((tags (elbkm--normalize-tags (or tags (elbkm--read-tags)))))
+    (if elbkm-use-list-buffer
+        (elbkm-search-list-show tags)
+      (let* ((bookmarks (elbkm-storage-list))
+             (filtered (elbkm--filter-by-tags bookmarks tags))
+             (bm (elbkm--select-bookmark filtered)))
+        (if bm
+            (progn
+              (funcall elbkm-open-function (elbkm-bookmark-url bm))
+              (message "Opening: %s" (elbkm-bookmark-url bm))
+              bm)
+          (message "Cancelled.")
+          nil)))))
+
+;;; Search list buffer (`tabulated-list-mode' based UI)
+
+(defvar-local elbkm-search-list--tags nil
+  "Tag filter active in the current `*elbkm-search*' buffer.
+Buffer-local so `revert-buffer' (`g') reapplies it on refresh.")
+
+(defvar-local elbkm-search-list--entries nil
+  "List of bookmark plists currently shown in the `*elbkm-search*' buffer.
+Buffer-local; preserves display order so the bookmark at point can be
+resolved from the ID returned by `tabulated-list-get-id'.")
+
+(defvar elbkm-search-list-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map (kbd "RET") #'elbkm-search-list--open)
+    map)
+  "Keymap for `elbkm-search-list-mode'.")
+
+(define-derived-mode elbkm-search-list-mode tabulated-list-mode "elbkm-search"
+  "Major mode for browsing elbkm search results.
+Inherits from `tabulated-list-mode'.  RET opens the bookmark at point
+via `elbkm-open-function'; `g' reloads the buffer from storage; `q'
+buries the window."
+  (setq tabulated-list-format
+        [("Title" 40 t)
+         ("URL" 50 t)
+         ("Tags" 20 t)
+         ("Description" 0 t)])
+  (setq tabulated-list-padding 1)
+  (setq tabulated-list-sort-key (cons "Title" nil))
+  (setq revert-buffer-function #'elbkm-search-list--revert))
+
+(defun elbkm-search-list--revert (&optional _ignore-auto _noconfirm)
+  "Refresh the `*elbkm-search*' buffer from storage, preserving filter."
+  (elbkm-search-list--populate elbkm-search-list--tags))
+
+(defun elbkm-search-list--entry (bm)
+  "Return a `tabulated-list-entry' describing bookmark BM."
+  (let* ((id (elbkm-bookmark-id bm))
+         (tags (mapconcat #'identity (elbkm-bookmark-tags bm) ", "))
+         (cols (vector (elbkm-bookmark-title bm)
+                       (elbkm-bookmark-url bm)
+                       (or tags "")
+                       (elbkm-bookmark-description bm))))
+    (list id cols)))
+
+(defun elbkm-search-list--populate (&optional tags)
+  "Replace current buffer's entries with bookmarks filtered by TAGS.
+TAGS is a list of tag strings or nil (no filter)."
+  (let* ((bookmarks (elbkm-storage-list))
+         (filtered (elbkm--filter-by-tags bookmarks tags)))
+    (setq elbkm-search-list--tags tags
+          elbkm-search-list--entries filtered)
+    (setq tabulated-list-entries
+          (mapcar #'elbkm-search-list--entry filtered))
+    (tabulated-list-print t nil)))
+
+(defun elbkm-search-list--bookmark-at-point ()
+  "Return the bookmark plist at point in the search list buffer, or nil."
+  (let ((id (tabulated-list-get-id)))
+    (when id
+      (cl-find-if (lambda (b) (equal (elbkm-bookmark-id b) id))
+                  elbkm-search-list--entries))))
+
+(defun elbkm-search-list--open ()
+  "Open the bookmark at point via `elbkm-open-function'."
+  (interactive)
+  (let ((bm (elbkm-search-list--bookmark-at-point)))
+    (unless bm
+      (user-error "No bookmark at point"))
+    (funcall elbkm-open-function (elbkm-bookmark-url bm))
+    (message "Opening: %s" (elbkm-bookmark-url bm))))
+
+(defun elbkm-search-list-show (tags)
+  "Display bookmarks in the `*elbkm-search*' buffer filtered by TAGS.
+TAGS is a list of strings, a comma-separated string, or nil (no
+filter).  Reuses an existing buffer if present, otherwise creates one
+and activates `elbkm-search-list-mode'.  Returns the buffer."
+  (let* ((buf-name "*elbkm-search*")
+         (tags (elbkm--normalize-tags tags))
+         (buf (get-buffer-create buf-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'elbkm-search-list-mode)
+        (elbkm-search-list-mode))
+      (elbkm-search-list--populate tags))
+    (pop-to-buffer buf)
+    buf))
 
 ;;;###autoload
 (defun elbkm-delete (&optional tags)

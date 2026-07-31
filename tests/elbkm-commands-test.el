@@ -183,5 +183,133 @@ so `elbkm--read-{url,title,description,tags}' never block on stdin."
                          :append))
           (should (equal later-call (elbkm-bookmark-id bm))))))))
 
+;;; `elbkm-use-list-buffer' (tabulated-list-mode based search UI)
+
+(defmacro elbkm-commands-test--with-list-buffer-mock (&rest body)
+  "Evaluate BODY with `pop-to-buffer' stubbed (no window side effects).
+The stub returns the buffer object for the requested name so callers
+can inspect it without altering the selected window."
+  (declare (indent 0) (debug body))
+  `(cl-letf (((symbol-function 'pop-to-buffer)
+              (lambda (buf-or-name)
+                (get-buffer buf-or-name))))
+     ,@body))
+
+(ert-deftest elbkm-commands-test/use-list-buffer-defaults-nil ()
+  "`elbkm-use-list-buffer' is nil by default."
+  (should (eq elbkm-use-list-buffer nil)))
+
+(ert-deftest elbkm-commands-test/search-list-populates-buffer ()
+  "With `elbkm-use-list-buffer' t, `elbkm-search' opens the list buffer
+populated with every bookmark from storage."
+  (let ((bm1 (elbkm-bookmark-create "https://a.example" "Alpha" "First" '("web")))
+        (bm2 (elbkm-bookmark-create "https://b.example" "Bravo" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm1)
+     (elbkm-storage-add bm2)
+     (let ((elbkm-use-list-buffer t))
+       (elbkm-commands-test--with-list-buffer-mock
+         (elbkm-commands-test--with-fake-input nil nil
+           (let ((result (elbkm-search)))
+             (should (bufferp result))
+             (should (equal (buffer-name result) "*elbkm-search*"))
+             (with-current-buffer "*elbkm-search*"
+               (should (derived-mode-p 'elbkm-search-list-mode))
+               (should (= (length tabulated-list-entries) 2))
+               (let ((urls (mapcar (lambda (e) (elt (cadr e) 1))
+                                   tabulated-list-entries)))
+                 (should (member "https://a.example" urls))
+                 (should (member "https://b.example" urls)))))))))))
+
+(ert-deftest elbkm-commands-test/search-list-filters-by-tags ()
+  "`elbkm-search' with list buffer applies the tag filter to the entries."
+  (let ((bm1 (elbkm-bookmark-create "https://a.example" "Alpha" "" '("foo")))
+        (bm2 (elbkm-bookmark-create "https://b.example" "Bravo" "" '("bar"))))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm1)
+     (elbkm-storage-add bm2)
+     (let ((elbkm-use-list-buffer t))
+       (elbkm-commands-test--with-list-buffer-mock
+         (elbkm-commands-test--with-fake-input nil nil
+           (elbkm-search "foo")
+           (with-current-buffer "*elbkm-search*"
+             (should (= (length tabulated-list-entries) 1))
+             (should (equal (elt (cadr (car tabulated-list-entries)) 1)
+                            "https://a.example"))
+             (should (equal elbkm-search-list--tags '("foo"))))))))))
+
+(ert-deftest elbkm-commands-test/search-list-empty-when-no-matches ()
+  "The list buffer shows zero entries when no bookmarks match the filter."
+  (let ((bm (elbkm-bookmark-create "https://a.example" "Alpha" "" '("foo"))))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((elbkm-use-list-buffer t))
+       (elbkm-commands-test--with-list-buffer-mock
+         (elbkm-commands-test--with-fake-input nil nil
+           (elbkm-search "nonexistent-tag")
+           (with-current-buffer "*elbkm-search*"
+             (should (derived-mode-p 'elbkm-search-list-mode))
+             (should (= (length tabulated-list-entries) 0)))))))))
+
+(ert-deftest elbkm-commands-test/search-list-open-calls-open-function ()
+  "`elbkm-search-list--open' invokes `elbkm-open-function' with the URL
+of the bookmark on the current entry line."
+  (let* ((bm (elbkm-bookmark-create "https://a.example" "Alpha" "" nil))
+         (opened-url nil))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((elbkm-use-list-buffer t)
+           (elbkm-open-function (lambda (url) (setq opened-url url))))
+       (elbkm-commands-test--with-list-buffer-mock
+         (elbkm-commands-test--with-fake-input nil nil
+           (elbkm-search)
+           (with-current-buffer "*elbkm-search*"
+             (goto-char (point-min))
+             (should (equal (tabulated-list-get-id)
+                            (elbkm-bookmark-id bm)))
+             (elbkm-search-list--open))))
+       (should (equal opened-url "https://a.example"))))))
+
+(ert-deftest elbkm-commands-test/search-list-revert-reloads-entries ()
+  "`revert-buffer' on the list buffer reloads entries from storage while
+preserving the active tag filter."
+  (let* ((bm1 (elbkm-bookmark-create "https://a.example" "Alpha" "" '("keep")))
+         (bm2 (elbkm-bookmark-create "https://b.example" "Bravo" "" '("drop"))))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm1)
+     (elbkm-storage-add bm2)
+     (let ((elbkm-use-list-buffer t))
+       (elbkm-commands-test--with-list-buffer-mock
+         (elbkm-commands-test--with-fake-input nil nil
+           (elbkm-search "keep")
+           (with-current-buffer "*elbkm-search*"
+             (should (= (length tabulated-list-entries) 1))
+             (elbkm-storage-add
+              (elbkm-bookmark-create "https://c.example" "Charlie" "" '("keep")))
+             (should (= (length tabulated-list-entries) 1))
+             (revert-buffer)
+             (should (= (length tabulated-list-entries) 2))
+             (should (equal elbkm-search-list--tags '("keep"))))))))))
+
+(ert-deftest elbkm-commands-test/search-list-falls-back-when-option-nil ()
+  "When `elbkm-use-list-buffer' is nil, `elbkm-search' keeps its original
+`completing-read' behavior and returns the selected bookmark plist."
+  (let ((bm (elbkm-bookmark-create "https://a.example" "Alpha" "" nil))
+        (opened-url nil))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((elbkm-use-list-buffer nil)
+           (elbkm-open-function (lambda (url) (setq opened-url url))))
+       ;; Make sure no leftover list buffer is hanging around from a prior test.
+       (when (get-buffer "*elbkm-search*")
+         (kill-buffer "*elbkm-search*"))
+       (elbkm-commands-test--with-fake-input
+           (elbkm--format-bookmark bm) t
+         (let ((result (elbkm-search)))
+           (should (equal (elbkm-bookmark-id result)
+                          (elbkm-bookmark-id bm)))))
+       (should (equal opened-url "https://a.example"))
+       (should (not (get-buffer "*elbkm-search*")))))))
+
 (provide 'elbkm-commands-test)
 ;;; elbkm-commands-test.el ends here

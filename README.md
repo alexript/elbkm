@@ -109,6 +109,17 @@ You will be presented with a `completing-read` list where you can:
 3. Press `RET` to open the selected bookmark in your browser
 4. Press `C-g` to cancel
 
+Alternatively, set `elbkm-use-list-buffer` to `t` (for example in your
+`init.el`) to display results in a dedicated `*elbkm-search*` buffer
+similar to `*Packages*` from `M-x list-packages`:
+
+```elisp
+(custom-set-variables '(elbkm-use-list-buffer t))
+```
+
+In that buffer: `RET` opens the entry at point, `g` reloads from storage,
+`q` buries the window.
+
 ### Delete a bookmark
 
 ```

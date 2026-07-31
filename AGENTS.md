@@ -73,7 +73,7 @@ Interactive commands (autoloaded):
 | Command | Args | Behavior |
 |---|---|---|
 | `elbkm-add` | `&optional url title description tags` | Prompt for nil args (validated loop); create + persist bookmark; run `elbkm-after-add-functions`. |
-| `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. |
+| `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. When `elbkm-use-list-buffer' is non-nil, open the `*elbkm-search*' buffer (RET on an entry opens its URL; `g' reloads). |
 | `elbkm-delete` | `&optional tags` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
 | `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
 
@@ -88,6 +88,16 @@ Hooks (abnormal, see `add-hook`):
 
 Both hooks swallow per-function errors via `with-demoted-errors` so a
 faulty hook never breaks the command or the user's workflow.
+
+User options:
+
+- `elbkm-open-function` — function called with a URL to open it.
+- `elbkm-after-add-functions` / `elbkm-after-delete-functions` — hooks.
+- `elbkm-use-list-buffer` — when non-nil, `elbkm-search` opens a
+  dedicated `*elbkm-search*` buffer using `tabulated-list-mode` (similar
+  to `*Packages*` from `M-x list-packages`).  RET on an entry opens its
+  URL; `g` reloads from storage; `q` buries the window.  When nil,
+  `elbkm-search` falls back to `completing-read`.
 
 Design rules to preserve:
 
