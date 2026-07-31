@@ -43,6 +43,9 @@
 ;; integrates with any completion framework (Icomplete, Vertico, Ivy, Helm,
 ;; Selectrum, ...).  Opening a bookmark delegates to `browse-url'.
 ;;
+;; When `org-capture' is loaded, `elbkm' registers a template under key "b"
+;; so selecting "b" from `org-capture' adds a bookmark via `elbkm-add'.
+;;
 ;; Bookmarks are stored as JSON under
 ;; `$XDG_DATA_HOME/elbkm/bookmarks.json' (or `~/.local/share/elbkm/bookmarks.json'),
 ;; the same layout used by the original Go tool.
@@ -262,6 +265,41 @@ Return t if a bookmark was deleted, nil otherwise."
      (t
       (message "Deletion cancelled.")
       nil))))
+
+;;; Org-capture integration
+
+;; Declared in `org-capture' (loaded lazily below); tell the byte-compiler.
+(defvar org-capture-templates)
+
+(defun elbkm--org-capture-add ()
+  "Add a bookmark from inside `org-capture' and return an empty string.
+This is the function bound to the `elbkm' `org-capture' template body.
+It calls `elbkm-add' for its side effects (creating and persisting a
+bookmark) and returns \"\" so that nothing is inserted into the capture
+target.  With `:immediate-finish t' the capture finalizes immediately
+without ever showing the buffer to the user."
+  (elbkm-add)
+  "")
+
+;;;###autoload
+(defun elbkm-register-org-capture-template ()
+  "Register an `org-capture' template that adds a bookmark via `elbkm-add'.
+
+The template uses key \"b\" and description \"Bookmark\".  It invokes
+`elbkm--org-capture-add' and is finalized immediately, so selecting \"b\"
+from `org-capture' simply runs `elbkm-add' interactively.
+
+This is called automatically when `org-capture' is loaded (see
+`with-eval-after-load' below), but it is exposed as a public command so
+users can call it manually after customizing `org-capture-templates'."
+  (add-to-list 'org-capture-templates
+               '("b" "Bookmark" plain (file "")
+                 "%(elbkm--org-capture-add)"
+                 :immediate-finish t)))
+
+;;;###autoload
+(with-eval-after-load 'org-capture
+  (elbkm-register-org-capture-template))
 
 (provide 'elbkm)
 ;;; elbkm.el ends here

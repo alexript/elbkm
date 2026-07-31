@@ -75,6 +75,7 @@ Interactive commands (autoloaded):
 | `elbkm-add` | `&optional url title description tags` | Prompt for nil args (validated loop); create + persist bookmark. |
 | `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. |
 | `elbkm-delete` | `&optional tags` | Filter, select, confirm with `y-or-n-p`, delete. |
+| `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
 
 Design rules to preserve:
 

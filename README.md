@@ -23,6 +23,7 @@ with any completion framework (Icomplete/Fido, Vertico, Ivy, Helm, Selectrum,
 - Open the selected bookmark in your browser (`browse-url`)
 - Delete bookmarks with a confirmation prompt
 - Filter candidates by tags
+- Registers an `org-capture` template under key `b` when `org-capture` is loaded
 
 ## Installation
 
@@ -120,6 +121,20 @@ From Lisp:
 
 This opens the selector to pick a bookmark, then asks for confirmation before
 deleting it.
+
+### Org-capture integration
+
+When `org-capture` is loaded, `elbkm` automatically registers a template
+under key `b`.  Selecting `b` from `org-capture` runs `elbkm-add`
+interactively and finalizes immediately without inserting anything into
+the capture target.
+
+To register it manually (for example after customizing
+`org-capture-templates`), call:
+
+```elisp
+M-x elbkm-register-org-capture-template
+```
 
 ## Configuration
 
