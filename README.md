@@ -176,6 +176,20 @@ emacs --batch --eval \
      (ert-run-tests-batch-and-exit t))'
 ```
 
+## Acknowledgments
+
+`elbkm` stands on the shoulders of great projects:
+
+- [bkm](https://github.com/airRnot1106/bkm) — the original CLI bookmark
+  manager by **airRnot1106**, whose design and on-disk format `elbkm` ports
+  to Emacs Lisp.
+- [Crush](https://github.com/charmbracelet/crush) — the AI coding assistant
+  by the **charmbracelet** team, used while developing `elbkm`.
+- [GNU Emacs](https://www.gnu.org/software/emacs/) — the extensible,
+  customizable, self-documenting real-time display editor and the platform
+  that makes `elbkm` possible.  Thanks to all its contributors and
+  maintainers over the decades.
+
 ## License
 
 MIT.  See [LICENSE](LICENSE).
