@@ -82,7 +82,7 @@ Arguments (all optional — `nil` triggers a prompt):
 |--------------|--------------------------------------|
 | `url`        | URL of the bookmark (required)       |
 | `title`      | Title of the bookmark (required)     |
-| `description | Description (optional, may be empty) |
+| `description` | Description (optional, may be empty) |
 | `tags`        | List of strings or comma-separated string |
 
 ### Search and open a bookmark
