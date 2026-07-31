@@ -123,10 +123,33 @@ deleting it.
 
 ## Configuration
 
-| Variable                  | Default        | Description                          |
-|---------------------------|----------------|--------------------------------------|
-| `elbkm-storage-file-path` | XDG default    | Path to the bookmarks JSON file      |
-| `elbkm-open-function`     | `browse-url`   | Function called with a URL to open   |
+| Variable                  | Default        | Description                                                  |
+|---------------------------|----------------|--------------------------------------------------------------|
+| `elbkm-storage-file-path` | XDG default    | Path to the bookmarks JSON file                              |
+| `elbkm-open-function`     | `browse-url`   | Function called with a URL to open a bookmark                |
+| `elbkm-history`           | `nil`          | Minibuffer history shared by `elbkm-add`, `-search`, `-delete` |
+
+`elbkm-storage-file-path` defaults to
+`$XDG_DATA_HOME/elbkm/bookmarks.json` (or
+`~/.local/share/elbkm/bookmarks.json` when `XDG_DATA_HOME` is unset).
+The parent directory is created automatically on the first write, so
+pointing it at any writable path works out of the box.  You can also set
+it interactively via `M-x customize-variable`.
+
+`elbkm-open-function` is invoked with the bookmark URL as its single
+argument.  The default `browse-url` honours `browse-url-browser-function`,
+so configuring your browser there is enough for `elbkm` to follow suit.
+Override it to integrate with another tool, e.g.:
+
+```elisp
+(setq elbkm-open-function
+      (lambda (url) (start-process "bkm-open" nil "xdg-open" url)))
+```
+
+`elbkm-history` is the minibuffer history list shared by `elbkm-add`,
+`-search` and `-delete`.  Emacs populates it as you use the commands;
+you usually do not need to touch it.  Customize `history-length` to
+control how many entries are retained.
 
 ## Running the tests
 
