@@ -112,5 +112,33 @@
   (should-error (elbkm-bookmark-reconstitute
                  "bad" "https://example.com" "Ex" "" nil nil nil)))
 
+(ert-deftest elbkm-bookmark-test/update-bookmark-preserves-id-and-created-at ()
+  "update keeps the original `:id' and `:created-at' and refreshes `:updated-at'."
+  (let* ((bm (elbkm-bookmark-reconstitute
+              "550e8400-e29b-41d4-a716-446655440000"
+              "https://old.example" "Old" "old desc" (list "x")
+              "2026-01-01T00:00:00Z" "2026-01-02T00:00:00Z"))
+         (updated (elbkm-bookmark-update bm
+                                         "https://new.example"
+                                         "New"
+                                         "new desc"
+                                         (list "y" "z"))))
+    (should (equal (elbkm-bookmark-id updated)
+                   "550e8400-e29b-41d4-a716-446655440000"))
+    (should (equal (elbkm-bookmark-url updated) "https://new.example"))
+    (should (equal (elbkm-bookmark-title updated) "New"))
+    (should (equal (elbkm-bookmark-description updated) "new desc"))
+    (should (equal (elbkm-bookmark-tags updated) (list "y" "z")))
+    (should (equal (elbkm-bookmark-created-at updated) "2026-01-01T00:00:00Z"))
+    (should (not (equal (elbkm-bookmark-updated-at updated)
+                        "2026-01-02T00:00:00Z")))))
+
+(ert-deftest elbkm-bookmark-test/update-bookmark-validates-fields ()
+  "update validates URL, title and tags with the same rules as create."
+  (let ((bm (elbkm-bookmark-create "https://example.com" "T" "" nil)))
+    (should-error (elbkm-bookmark-update bm "" "T" "" nil))
+    (should-error (elbkm-bookmark-update bm "https://example.com" " " "" nil))
+    (should-error (elbkm-bookmark-update bm "https://example.com" "T" "" (list "")))))
+
 (provide 'elbkm-bookmark-test)
 ;;; elbkm-bookmark-test.el ends here

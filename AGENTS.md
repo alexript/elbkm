@@ -46,14 +46,17 @@ A bookmark is a plist:
 - `elbkm-bookmark-create` — builds a bookmark with a fresh ID and timestamps.
 - `elbkm-bookmark-reconstitute` — rebuilds a bookmark from persisted fields,
   validating each (used by storage on read).
+- `elbkm-bookmark-update` — returns a new bookmark plist derived from an
+  existing one with new URL/title/description/tags, preserving `:id` and
+  `:created-at` and refreshing `:updated-at` (used by `elbkm-edit`).
 - Accessors: `elbkm-bookmark-{id,url,title,description,tags,created-at,updated-at}`.
 
 Keep this layer dependency-free (only `subr-x` and `url-parse`).
 
 ### Storage layer — `elbkm-storage.el`
 
-JSON repository implementing the same `Add/List/Delete` contract as the Go
-`Repository` interface.
+JSON repository implementing the same `Add/List/Delete/Update` contract as
+the Go `Repository` interface.
 
 - `elbkm-storage-file-path` (defcustom, default nil) — nil means use the
   XDG-compliant default path. Tests override it with a temp path.
@@ -62,6 +65,9 @@ JSON repository implementing the same `Add/List/Delete` contract as the Go
   on write.
 - `elbkm-storage-list` tolerates a missing or empty file (returns nil) instead
   of erroring — more user-friendly than the strict Go behavior; preserve this.
+- `elbkm-storage-update` replaces the bookmark whose ID matches BM's ID in
+  place, preserving the original list position; signals an error if no
+  bookmark with that ID exists.
 - `elbkm-storage--alist-get` is key-type-agnostic because `json-read` may
   produce string, symbol, or keyword keys depending on Emacs version. Do not
   "simplify" it to a single key type.
@@ -74,7 +80,8 @@ Interactive commands (autoloaded):
 |---|---|---|
 | `elbkm-add` | `&optional url title description tags` | Prompt for nil args (validated loop); create + persist bookmark; run `elbkm-after-add-functions`. |
 | `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. When `elbkm-use-list-buffer' is non-nil, open the `*elbkm-search*' buffer (RET on an entry opens its URL; `g' reloads). |
-| `elbkm-delete` | `&optional tags` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
+| `elbkm-edit` | `&optional bookmark` | Prompt for a bookmark via `completing-read' (or use BOOKMARK directly), then re-prompt for each field with the current value as the initial input; update in place; run `elbkm-after-edit-functions` on success. |
+| `elbkm-delete` | `&optional tags bookmark` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
 | `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
 
 Hooks (abnormal, see `add-hook`):
@@ -82,22 +89,28 @@ Hooks (abnormal, see `add-hook`):
 - `elbkm-after-add-functions` — list of functions called with the newly
   created bookmark plist after `elbkm-storage-add` succeeds. Used to
   react to additions (logging, syncing, notifications, etc.).
+- `elbkm-after-edit-functions` — list of functions called with the updated
+  bookmark plist after `elbkm-storage-update` succeeds. The plist keeps
+  the original `:id` and `:created-at` and gets a fresh `:updated-at`.
 - `elbkm-after-delete-functions` — list of functions called with the
   deleted bookmark plist after `elbkm-storage-delete` succeeds. Not
   invoked when the user cancels confirmation.
 
-Both hooks swallow per-function errors via `with-demoted-errors` so a
+All three hooks swallow per-function errors via `with-demoted-errors` so a
 faulty hook never breaks the command or the user's workflow.
 
 User options:
 
 - `elbkm-open-function` — function called with a URL to open it.
-- `elbkm-after-add-functions` / `elbkm-after-delete-functions` — hooks.
+- `elbkm-after-add-functions` / `elbkm-after-edit-functions` /
+  `elbkm-after-delete-functions` — hooks.
 - `elbkm-use-list-buffer` — when non-nil, `elbkm-search` opens a
   dedicated `*elbkm-search*` buffer using `tabulated-list-mode` (similar
   to `*Packages*` from `M-x list-packages`).  RET on an entry opens its
-  URL; `g` reloads from storage; `q` buries the window.  When nil,
-  `elbkm-search` falls back to `completing-read`.
+  URL; `a` adds a bookmark; `e` edits the entry at point via `elbkm-edit`;
+  `d` deletes the entry at point after confirmation; `g` reloads from
+  storage; `q` buries the window.  When nil, `elbkm-search` falls back to
+  `completing-read`.
 
 Design rules to preserve:
 
@@ -146,10 +159,10 @@ emacs --batch --eval \
 When changing the domain or storage layers, **run both** — the storage tests
 exercise `elbkm-bookmark-reconstitute` on real JSON round-trips.
 When changing `elbkm.el` commands or hooks, also run the
-`elbkm-commands-test` suite — it covers the `elbkm-after-add-functions`
-and `elbkm-after-delete-functions` hooks end-to-end, and is the home
-for any future command-level tests (search variants, `elbkm-open-function`,
-org-capture integration, etc.).
+`elbkm-commands-test` suite — it covers the `elbkm-after-add-functions`,
+`elbkm-after-edit-functions` and `elbkm-after-delete-functions` hooks
+end-to-end, and is the home for any future command-level tests (search
+variants, `elbkm-open-function`, org-capture integration, etc.).
 
 There is no Makefile or CI; the commands above are the canonical check.
 

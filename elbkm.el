@@ -36,6 +36,7 @@
 ;;
 ;;     M-x elbkm-add           Add a bookmark (interactive or programmatic).
 ;;     M-x elbkm-search        Fuzzy-search bookmarks and open one in a browser.
+;;     M-x elbkm-edit          Edit an existing bookmark's fields.
 ;;     M-x elbkm-delete        Fuzzy-search bookmarks and delete one.
 ;;
 ;; Each command also accepts arguments when called from Lisp, so they can be
@@ -50,10 +51,11 @@
 ;; `$XDG_DATA_HOME/elbkm/bookmarks.json' (or `~/.local/share/elbkm/bookmarks.json'),
 ;; the same layout used by the original Go tool.
 ;;
-;; After a bookmark is successfully added or deleted, every function in
-;; `elbkm-after-add-functions' or `elbkm-after-delete-functions'
-;; (respectively) is invoked with the affected bookmark plist as its
-;; single argument.  These are abnormal hooks: use `add-hook' to register.
+;; After a bookmark is successfully added, edited or deleted, every
+;; function in `elbkm-after-add-functions', `elbkm-after-edit-functions'
+;; or `elbkm-after-delete-functions' (respectively) is invoked with the
+;; affected bookmark plist as its single argument.  These are abnormal
+;; hooks: use `add-hook' to register.
 
 ;;; Code:
 
@@ -90,13 +92,24 @@ just removed from storage.  Use `add-hook' to register.  Errors in a hook
 are demoted to messages and do not interrupt the user's flow."
   :type 'hook)
 
+(defcustom elbkm-after-edit-functions nil
+  "Abnormal hook run after a bookmark is successfully edited.
+
+Each function is called with one argument: the updated bookmark plist
+that replaced the previous one in storage.  The plist has the same
+`:id' and `:created-at' as before and a fresh `:updated-at'.  Use
+`add-hook' to register.  Errors in a hook are demoted to messages and do
+not interrupt the user's flow."
+  :type 'hook)
+
 (defcustom elbkm-use-list-buffer nil
   "When non-nil, `elbkm-search' shows results in a dedicated buffer.
 The buffer, named `*elbkm-search*', uses `tabulated-list-mode' so it
 behaves like `*Packages*' from `M-x list-packages': RET on an entry
 opens the bookmark URL via `elbkm-open-function'; `a' adds a bookmark;
-`d' deletes the bookmark at point after confirmation; `g' refreshes the
-buffer from storage; and `q' buries the window.
+`e' edits the bookmark at point via `elbkm-edit'; `d' deletes the
+bookmark at point after confirmation; `g' refreshes the buffer from
+storage; and `q' buries the window.
 When this option is nil, `elbkm-search' uses `completing-read' as
 before."
   :type 'boolean)
@@ -182,39 +195,45 @@ hooks or the calling command."
 
 ;;; Interactive input
 
-(defun elbkm--read-url ()
-  "Read a URL from the minibuffer, re-prompting until it is valid."
+(defun elbkm--read-url (&optional default)
+  "Read a URL from the minibuffer, re-prompting until it is valid.
+When DEFAULT is non-nil, use it as the initial minibuffer input."
   (let ((prompt "URL: "))
     (catch 'done
       (while t
-        (let ((input (read-string prompt nil 'elbkm-history)))
+        (let ((input (read-string prompt default 'elbkm-history)))
           (condition-case nil
               (progn (elbkm-bookmark-validate-url input)
                      (throw 'done input))
             (error (setq prompt "Invalid URL. URL: "))))))))
 
-(defun elbkm--read-title ()
-  "Read a title from the minibuffer, re-prompting until it is non-empty."
+(defun elbkm--read-title (&optional default)
+  "Read a title from the minibuffer, re-prompting until it is non-empty.
+When DEFAULT is non-nil, use it as the initial minibuffer input."
   (let ((prompt "Title: "))
     (catch 'done
       (while t
-        (let ((input (read-string prompt nil 'elbkm-history)))
+        (let ((input (read-string prompt default 'elbkm-history)))
           (condition-case nil
               (progn (elbkm-bookmark-validate-title input)
                      (throw 'done input))
             (error (setq prompt "Title cannot be empty. Title: "))))))))
 
-(defun elbkm--read-description ()
-  "Read an optional description from the minibuffer."
-  (read-string "Description: " nil 'elbkm-history))
+(defun elbkm--read-description (&optional default)
+  "Read an optional description from the minibuffer.
+When DEFAULT is non-nil, use it as the initial minibuffer input."
+  (read-string "Description: " default 'elbkm-history))
 
-(defun elbkm--read-tags ()
+(defun elbkm--read-tags (&optional default)
   "Read optional comma-separated tags from the minibuffer.
-Return a list of trimmed strings, or nil when left empty."
-  (let ((prompt "Tags (comma-separated, optional): "))
+Return a list of trimmed strings, or nil when left empty.  When DEFAULT
+is a list of strings, it is shown as the initial comma-separated input."
+  (let* ((initial (when default
+                    (mapconcat #'identity (elbkm--normalize-tags default) ", ")))
+         (prompt "Tags (comma-separated, optional): "))
     (catch 'done
       (while t
-        (let* ((input (read-string prompt nil 'elbkm-history))
+        (let* ((input (read-string prompt initial 'elbkm-history))
                (trimmed (string-trim input)))
           (if (string-empty-p trimmed)
               (throw 'done nil)
@@ -266,8 +285,9 @@ When `elbkm-use-list-buffer' is non-nil, results are shown in the
 dedicated `*elbkm-search*' buffer instead, using `tabulated-list-mode'
 (similar to `*Packages*' from `M-x list-packages').  In that buffer,
 RET opens the entry at point via `elbkm-open-function', `a' adds a
-bookmark, `d' deletes the entry at point after confirmation, `g' reloads
-from storage, and `q' buries the window.
+bookmark, `e' edits the entry at point via `elbkm-edit', `d' deletes
+the entry at point after confirmation, `g' reloads from storage, and
+`q' buries the window.
 
 When called from Lisp, TAGS may be a list of strings or a comma-separated
 string.  Pass nil to search all bookmarks.
@@ -306,15 +326,17 @@ resolved from the ID returned by `tabulated-list-get-id'.")
     (define-key map (kbd "RET") #'elbkm-search-list--open)
     (define-key map (kbd "a") #'elbkm-search-list--add)
     (define-key map (kbd "d") #'elbkm-search-list--delete)
+    (define-key map (kbd "e") #'elbkm-search-list--edit)
     map)
   "Keymap for `elbkm-search-list-mode'.")
 
 (define-derived-mode elbkm-search-list-mode tabulated-list-mode "elbkm-search"
   "Major mode for browsing elbkm search results.
 Inherits from `tabulated-list-mode'.  RET opens the bookmark at point
-via `elbkm-open-function'; `a' adds a bookmark; `d' deletes the bookmark
-at point after confirmation; `g' reloads the buffer from storage; and
-`q' buries the window."
+via `elbkm-open-function'; `a' adds a bookmark; `e' edits the bookmark
+at point via `elbkm-edit'; `d' deletes the bookmark at point after
+confirmation; `g' reloads the buffer from storage; and `q' buries the
+window."
   (setq tabulated-list-format
         [("Title" 40 t)
          ("URL" 50 t)
@@ -369,6 +391,15 @@ TAGS is a list of tag strings or nil (no filter)."
     (unless bm
       (user-error "No bookmark at point"))
     (when (elbkm-delete nil bm)
+      (elbkm-search-list--populate elbkm-search-list--tags))))
+
+(defun elbkm-search-list--edit ()
+  "Edit the bookmark at point via `elbkm-edit', then refresh the buffer."
+  (interactive)
+  (let ((bm (elbkm-search-list--bookmark-at-point)))
+    (unless bm
+      (user-error "No bookmark at point"))
+    (when (elbkm-edit bm)
       (elbkm-search-list--populate elbkm-search-list--tags))))
 
 (defun elbkm-search-list--open ()
@@ -429,6 +460,44 @@ Return t if a bookmark was deleted, nil otherwise."
      (t
       (message "Deletion cancelled.")
       nil))))
+
+;;;###autoload
+(defun elbkm-edit (&optional bookmark)
+  "Edit an existing bookmark.
+
+Interactively, prompt the user to select a bookmark via `completing-read'
+and then re-prompt for its URL, title, description and tags in turn,
+pre-populating each prompt with the current value (press RET to keep
+the existing value).
+
+When called from Lisp, BOOKMARK may be a bookmark plist to edit
+directly; pass nil to be prompted for one.  Programmatic edits that
+already have the new fields prepared should call
+`elbkm-bookmark-update' and `elbkm-storage-update' directly.
+
+After a successful update, every function in
+`elbkm-after-edit-functions' is invoked with the updated bookmark
+plist as its single argument.  The updated plist keeps the original
+`:id' and `:created-at' and gets a fresh `:updated-at'.
+
+Return the updated bookmark plist, or nil if the user cancelled the
+selection."
+  (interactive)
+  (let ((bm (or bookmark (elbkm--select-bookmark (elbkm-storage-list)))))
+    (if (null bm)
+        (progn (message "Edit cancelled.") nil)
+      (let* ((url (elbkm--read-url (elbkm-bookmark-url bm)))
+             (title (elbkm--read-title (elbkm-bookmark-title bm)))
+             (description (elbkm--read-description
+                           (elbkm-bookmark-description bm)))
+             (tags (elbkm--read-tags (elbkm-bookmark-tags bm)))
+             (updated (elbkm-bookmark-update bm url title description tags)))
+        (elbkm-storage-update updated)
+        (message "Bookmark updated: %s — %s"
+                 (elbkm-bookmark-title updated)
+                 (elbkm-bookmark-url updated))
+        (elbkm--run-hooks-with-bookmark elbkm-after-edit-functions updated)
+        updated))))
 
 ;;; Org-capture integration
 

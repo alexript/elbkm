@@ -167,6 +167,21 @@ Signal an error if URL or TITLE is invalid or any TAG is invalid."
      (elbkm-bookmark-validate-tags tags)
      now now)))
 
+(defun elbkm-bookmark-update (bm url title description tags)
+  "Return a new bookmark plist derived from BM with the given fields.
+The new plist keeps BM's :id and :created-at, and gets a fresh
+`:updated-at'.  URL, TITLE, DESCRIPTION and TAGS are validated with the
+same rules as `elbkm-bookmark-create'."
+  (let ((updated-at (elbkm-bookmark--now-iso)))
+    (elbkm-bookmark-make
+     (elbkm-bookmark-id bm)
+     (elbkm-bookmark-validate-url url)
+     (elbkm-bookmark-validate-title title)
+     (elbkm-bookmark-validate-description description)
+     (elbkm-bookmark-validate-tags tags)
+     (elbkm-bookmark-created-at bm)
+     updated-at)))
+
 (defun elbkm-bookmark--now-iso ()
   "Return the current time as an ISO 8601 string."
   (concat (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)) "Z"))

@@ -76,5 +76,51 @@
       (should (equal (elbkm-bookmark-description back) ""))
       (should (equal (elbkm-bookmark-tags back) nil)))))
 
+(ert-deftest elbkm-storage-test/update-replaces-bookmark-by-id ()
+  "update replaces the bookmark with the matching ID and returns it."
+  (let ((elbkm-storage-file-path (elbkm-storage-test--fresh-file)))
+    (let ((bm (elbkm-bookmark-create "https://example.com" "Old" "d" '("a"))))
+      (elbkm-storage-add bm)
+      (let* ((updated (elbkm-bookmark-update bm
+                                             "https://new.example"
+                                             "New"
+                                             "new"
+                                             '("b" "c")))
+             (returned (elbkm-storage-update updated)))
+        (should (eq returned updated))
+        (let ((all (elbkm-storage-list)))
+          (should (= (length all) 1))
+          (should (equal (elbkm-bookmark-url (car all)) "https://new.example"))
+          (should (equal (elbkm-bookmark-title (car all)) "New"))
+          (should (equal (elbkm-bookmark-tags (car all)) (list "b" "c")))
+          (should (equal (elbkm-bookmark-id (car all))
+                         (elbkm-bookmark-id bm))))))))
+
+(ert-deftest elbkm-storage-test/update-preserves-order ()
+  "update keeps the original position of the replaced bookmark."
+  (let ((elbkm-storage-file-path (elbkm-storage-test--fresh-file)))
+    (let ((bm1 (elbkm-bookmark-create "https://a.example" "A" "" nil))
+          (bm2 (elbkm-bookmark-create "https://b.example" "B" "" nil))
+          (bm3 (elbkm-bookmark-create "https://c.example" "C" "" nil)))
+      (elbkm-storage-add bm1)
+      (elbkm-storage-add bm2)
+      (elbkm-storage-add bm3)
+      (let* ((updated (elbkm-bookmark-update bm2 "https://B2" "B2" "" nil)))
+        (elbkm-storage-update updated)
+        (let* ((all (elbkm-storage-list))
+               (urls (mapcar #'elbkm-bookmark-url all)))
+          (should (equal urls
+                         (list "https://a.example"
+                               "https://B2"
+                               "https://c.example"))))))))
+
+(ert-deftest elbkm-storage-test/update-errors-when-id-missing ()
+  "update signals an error when no bookmark matches BM's ID."
+  (let ((elbkm-storage-file-path (elbkm-storage-test--fresh-file)))
+    (let* ((bm (elbkm-bookmark-create "https://example.com" "T" "" nil))
+           (stranger (elbkm-bookmark-create "https://other.example" "O" "" nil)))
+      (elbkm-storage-add bm)
+      (should-error (elbkm-storage-update stranger)))))
+
 (provide 'elbkm-storage-test)
 ;;; elbkm-storage-test.el ends here

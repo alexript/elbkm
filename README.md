@@ -21,11 +21,13 @@ with any completion framework (Icomplete/Fido, Vertico, Ivy, Helm, Selectrum,
 - Add bookmarks directly by passing arguments from Lisp
 - Search bookmarks with `completing-read` (fuzzy/filtered by your framework)
 - Open the selected bookmark in your browser (`browse-url`)
+- Edit an existing bookmark's URL, title, description or tags
 - Delete bookmarks with a confirmation prompt
 - Filter candidates by tags
 - Registers an `org-capture` template under key `b` when `org-capture` is loaded
-- Pluggable `elbkm-after-add-functions` and `elbkm-after-delete-functions`
-  hooks for reacting to successful add/delete events
+- Pluggable `elbkm-after-add-functions`, `elbkm-after-edit-functions` and
+  `elbkm-after-delete-functions` hooks for reacting to successful add, edit
+  and delete events
 
 ## Installation
 
@@ -45,8 +47,8 @@ Add the directory to `load-path` and load the package:
   :straight (elbkm :type git :host github :repo "alexript/elbkm"))
 ```
 
-The three commands are autoloaded, so you can call `M-x elbkm-add`,
-`M-x elbkm-search` and `M-x elbkm-delete` right away.
+The four commands are autoloaded, so you can call `M-x elbkm-add`,
+`M-x elbkm-search`, `M-x elbkm-edit` and `M-x elbkm-delete` right away.
 
 ## Data storage
 
@@ -118,9 +120,9 @@ similar to `*Packages*` from `M-x list-packages`:
 ```
 
 In that buffer: `RET` opens the entry at point, `a` adds a new bookmark,
-`d` deletes the entry at point after confirmation, `g` reloads from storage,
-`q` buries the window.  The list is refreshed after a successful add or
-delete.
+`e` edits the entry at point via `elbkm-edit`, `d` deletes the entry at
+point after confirmation, `g` reloads from storage, `q` buries the window.
+The list is refreshed after a successful add, edit or delete.
 
 ### Delete a bookmark
 
@@ -136,6 +138,31 @@ From Lisp:
 
 This opens the selector to pick a bookmark, then asks for confirmation before
 deleting it.
+
+### Edit a bookmark
+
+```
+M-x elbkm-edit
+```
+
+Prompts for a bookmark via `completing-read` and then re-prompts for its
+URL, title, description and tags in turn, pre-populating each field with
+the current value (press `RET` to keep the value, or edit it before
+confirming).  The bookmark keeps its original ID and creation timestamp;
+only `:updated-at` is refreshed, and the on-disk JSON is rewritten in
+place.
+
+From Lisp, pass a bookmark plist directly to edit it without going
+through the selector:
+
+```elisp
+(elbkm-edit some-bookmark-plist)
+```
+
+When the list-buffer UI is active (`elbkm-use-list-buffer` non-nil), the
+buffer binds `e` to `elbkm-edit` for the bookmark at point.  Programmatic
+edits that already have new fields prepared should call
+`elbkm-bookmark-update` and `elbkm-storage-update` directly.
 
 ### Org-capture integration
 
@@ -157,8 +184,9 @@ M-x elbkm-register-org-capture-template
 |---------------------------|----------------|--------------------------------------------------------------|
 | `elbkm-storage-file-path` | XDG default    | Path to the bookmarks JSON file                              |
 | `elbkm-open-function`     | `browse-url`   | Function called with a URL to open a bookmark                |
-| `elbkm-history`           | `nil`          | Minibuffer history shared by `elbkm-add`, `-search`, `-delete` |
+| `elbkm-history`           | `nil`          | Minibuffer history shared by `elbkm-add`, `-search`, `-edit`, `-delete` |
 | `elbkm-after-add-functions`    | `nil`     | Abnormal hook run after a successful add (see [Hooks](#hooks))    |
+| `elbkm-after-edit-functions`   | `nil`     | Abnormal hook run after a successful edit (see [Hooks](#hooks))   |
 | `elbkm-after-delete-functions` | `nil`     | Abnormal hook run after a successful delete (see [Hooks](#hooks)) |
 
 `elbkm-storage-file-path` defaults to
@@ -179,18 +207,19 @@ Override it to integrate with another tool, e.g.:
 ```
 
 `elbkm-history` is the minibuffer history list shared by `elbkm-add`,
-`-search` and `-delete`.  Emacs populates it as you use the commands;
-you usually do not need to touch it.  Customize `history-length` to
-control how many entries are retained.
+`-search`, `-edit` and `-delete`.  Emacs populates it as you use the
+commands; you usually do not need to touch it.  Customize `history-length`
+to control how many entries are retained.
 
 ### Hooks
 
-`elbkm` exposes two abnormal hooks (use the standard `add-hook` /
+`elbkm` exposes three abnormal hooks (use the standard `add-hook` /
 `remove-hook` to manage them):
 
 | Hook                              | Fired when                       | Argument                  |
 |-----------------------------------|----------------------------------|---------------------------|
 | `elbkm-after-add-functions`       | `elbkm-add` successfully persists a bookmark | the newly created bookmark plist |
+| `elbkm-after-edit-functions`      | `elbkm-edit` successfully updates a bookmark in place | the updated bookmark plist (same `:id` and `:created-at`, fresh `:updated-at`) |
 | `elbkm-after-delete-functions`    | `elbkm-delete` successfully removes a bookmark (after `y-or-n-p` confirmation) | the deleted bookmark plist |
 
 Each function in the hook list is called with the affected bookmark
@@ -220,6 +249,19 @@ Example: keep a personal audit trail of deletions in a buffer:
                               (elbkm-bookmark-url bm))))))
 ```
 
+Example: log the previous and new URL whenever a bookmark is edited:
+
+```elisp
+(advice-add #'elbkm-bookmark-update :before
+            (lambda (bm &rest _)
+              (put bm 'previous-url (elbkm-bookmark-url bm))))
+(add-hook 'elbkm-after-edit-functions
+          (lambda (bm)
+            (message "Bookmark edited: %s → %s"
+                     (elbkm-bookmark-url (get bm 'previous-url))
+                     (elbkm-bookmark-url bm))))
+```
+
 ## Running the tests
 
 ```sh
@@ -227,6 +269,7 @@ emacs --batch --eval \
   '(let ((load-path (append (list "." "tests") load-path)))
      (require (quote elbkm-bookmark-test))
      (require (quote elbkm-storage-test))
+     (require (quote elbkm-commands-test))
      (ert-run-tests-batch-and-exit t))'
 ```
 

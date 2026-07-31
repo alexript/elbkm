@@ -183,6 +183,128 @@ so `elbkm--read-{url,title,description,tags}' never block on stdin."
                          :append))
           (should (equal later-call (elbkm-bookmark-id bm))))))))
 
+;;; `elbkm-edit' and `elbkm-after-edit-functions'
+
+(ert-deftest elbkm-commands-test/edit-runs-after-edit-hooks ()
+  "`elbkm-edit' invokes every function in `elbkm-after-edit-functions'."
+  (let ((bm (elbkm-bookmark-create "https://old.example" "Old" "old" '("a"))))
+    (elbkm-commands-test--with-fresh-storage
+      (elbkm-storage-add bm)
+      (let ((hook-calls nil)
+            (calls-by-order nil)
+            (input-sequence '("https://new.example" "New" "new" "x,y")))
+        (unwind-protect
+            (progn
+              (add-hook 'elbkm-after-edit-functions
+                        (lambda (b) (push b hook-calls)))
+              (add-hook 'elbkm-after-edit-functions
+                        (lambda (b) (push (elbkm-bookmark-title b) calls-by-order))
+                        :append)
+              (cl-letf (((symbol-function 'read-string)
+                         (lambda (&rest _)
+                           (or (pop input-sequence) ""))))
+                (elbkm-edit bm)))
+          (remove-hook 'elbkm-after-edit-functions
+                       (lambda (b) (push b hook-calls)))
+          (remove-hook 'elbkm-after-edit-functions
+                       (lambda (b) (push (elbkm-bookmark-title b) calls-by-order))))
+        (should (= (length hook-calls) 1))
+        (should (equal (elbkm-bookmark-title (car hook-calls)) "New"))
+        (should (equal (elbkm-bookmark-url (car hook-calls))
+                       "https://new.example"))
+        (should (equal (elbkm-bookmark-tags (car hook-calls)) (list "x" "y")))
+        ;; Hooks fired after the update, so the new title is what they see.
+        (should (equal (car calls-by-order) "New"))))))
+
+(ert-deftest elbkm-commands-test/edit-skips-add-and-delete-hooks ()
+  "`elbkm-edit' does not run `elbkm-after-add-functions' or `elbkm-after-delete-functions'."
+  (let ((bm (elbkm-bookmark-create "https://old.example" "Old" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+      (elbkm-storage-add bm)
+      (let ((add-calls 0)
+            (delete-calls 0))
+        (unwind-protect
+            (progn
+              (add-hook 'elbkm-after-add-functions
+                        (lambda (_) (cl-incf add-calls)))
+              (add-hook 'elbkm-after-delete-functions
+                        (lambda (_) (cl-incf delete-calls)))
+              (cl-letf (((symbol-function 'read-string)
+                         (lambda (&rest _) "https://new.example")))
+                (elbkm-edit bm)))
+          (remove-hook 'elbkm-after-add-functions
+                       (lambda (_) (cl-incf add-calls)))
+          (remove-hook 'elbkm-after-delete-functions
+                       (lambda (_) (cl-incf delete-calls))))
+        (should (= add-calls 0))
+        (should (= delete-calls 0))))))
+
+(ert-deftest elbkm-commands-test/edit-cancelled-skips-hooks ()
+  "Cancelling the bookmark selection does not run `elbkm-after-edit-functions'."
+  (let ((bm (elbkm-bookmark-create "https://example.com" "T" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+      (elbkm-storage-add bm)
+      (let ((hook-calls 0))
+        (unwind-protect
+            (progn
+              (add-hook 'elbkm-after-edit-functions
+                        (lambda (_) (cl-incf hook-calls)))
+              (cl-letf (((symbol-function 'completing-read)
+                         (lambda (&rest _) nil)))
+                (should (eq (elbkm-edit) nil))))
+          (remove-hook 'elbkm-after-edit-functions
+                       (lambda (_) (cl-incf hook-calls))))
+        (should (= hook-calls 0))
+        (should (= (length (elbkm-storage-list)) 1))))))
+
+(ert-deftest elbkm-commands-test/hook-errors-do-not-break-edit ()
+  "An error in one `elbkm-after-edit-functions' entry does not stop later ones."
+  (let ((bm (elbkm-bookmark-create "https://example.com" "T" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+      (elbkm-storage-add bm)
+      (let ((later-call nil))
+        (unwind-protect
+            (progn
+              (add-hook 'elbkm-after-edit-functions
+                        (lambda (_) (error "boom from edit hook")))
+              (add-hook 'elbkm-after-edit-functions
+                        (lambda (b) (setq later-call (elbkm-bookmark-title b)))
+                        :append)
+              (cl-letf (((symbol-function 'read-string)
+                         (lambda (&rest _) "https://new.example")))
+                (elbkm-edit bm)))
+          (remove-hook 'elbkm-after-edit-functions
+                       (lambda (_) (error "boom from edit hook")))
+          (remove-hook 'elbkm-after-edit-functions
+                       (lambda (b) (setq later-call (elbkm-bookmark-title b)))
+                       :append))
+        ;; read-string was stubbed to the same value for every field,
+        ;; so the new title equals the new URL.
+        (should (equal later-call "https://new.example"))))))
+
+(ert-deftest elbkm-commands-test/edit-preserves-id-and-created-at ()
+  "`elbkm-edit' keeps the bookmark's ID and created-at unchanged."
+  (let ((bm (elbkm-bookmark-reconstitute
+             "550e8400-e29b-41d4-a716-446655440000"
+             "https://example.com" "T" "" nil
+             "2026-01-01T00:00:00Z" "2026-01-01T00:00:00Z")))
+    (elbkm-commands-test--with-fresh-storage
+      (elbkm-storage-add bm)
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) "https://new.example")))
+        (let ((updated (elbkm-edit bm)))
+          (should (equal (elbkm-bookmark-id updated)
+                         "550e8400-e29b-41d4-a716-446655440000"))
+          (should (equal (elbkm-bookmark-created-at updated)
+                         "2026-01-01T00:00:00Z"))
+          (should (not (equal (elbkm-bookmark-updated-at updated)
+                              "2026-01-01T00:00:00Z")))
+          (let ((persisted (car (elbkm-storage-list))))
+            (should (equal (elbkm-bookmark-id persisted)
+                           "550e8400-e29b-41d4-a716-446655440000"))
+            (should (equal (elbkm-bookmark-url persisted)
+                           "https://new.example"))))))))
+
 ;;; `elbkm-use-list-buffer' (tabulated-list-mode based search UI)
 
 (defmacro elbkm-commands-test--with-list-buffer-mock (&rest body)
@@ -318,6 +440,11 @@ preserving the active tag filter."
   (should (eq (lookup-key elbkm-search-list-mode-map (kbd "d"))
              #'elbkm-search-list--delete)))
 
+(ert-deftest elbkm-commands-test/search-list-keymap-binds-edit ()
+  "The search list binds `e' to edit."
+  (should (eq (lookup-key elbkm-search-list-mode-map (kbd "e"))
+             #'elbkm-search-list--edit)))
+
 (ert-deftest elbkm-commands-test/search-list-add-refreshes-buffer ()
   "Adding from the search list refreshes its entries."
   (elbkm-commands-test--with-fresh-storage
@@ -357,6 +484,31 @@ preserving the active tag filter."
              (should (= confirmation-calls 1))
              (should (= (length tabulated-list-entries) 0))
              (should-not (elbkm-storage-list)))
+         (kill-buffer buffer))))))
+
+(ert-deftest elbkm-commands-test/search-list-edit-refreshes-buffer ()
+  "Editing from the search list updates the bookmark and refreshes entries."
+  (let ((bm (elbkm-bookmark-create "https://a.example" "Alpha" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((buffer (get-buffer-create "*elbkm-search*")))
+       (unwind-protect
+           (with-current-buffer buffer
+             (elbkm-search-list-mode)
+             (elbkm-search-list--populate nil)
+             (goto-char (point-min))
+             (cl-letf (((symbol-function 'elbkm-edit)
+                        (lambda (b)
+                          (elbkm-storage-update
+                           (elbkm-bookmark-update b
+                                                   "https://a.example"
+                                                   "Alpha edited"
+                                                   ""
+                                                   nil)))))
+               (elbkm-search-list--edit))
+             (should (= (length tabulated-list-entries) 1))
+             (should (equal (elt (cadr (car tabulated-list-entries)) 0)
+                            "Alpha edited")))
          (kill-buffer buffer))))))
 
 (provide 'elbkm-commands-test)

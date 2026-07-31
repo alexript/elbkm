@@ -168,5 +168,23 @@ Return an empty list when the storage file does not exist or is empty."
     (elbkm-storage--write rest)
     t))
 
+(defun elbkm-storage-update (bm)
+  "Replace the bookmark in storage whose ID equals BM's ID with BM.
+Preserve the original position in the list.  Return BM, or signal an
+error if no bookmark with the same ID exists."
+  (let* ((id (elbkm-bookmark-id bm))
+         (bookmarks (elbkm-storage-list)))
+    (unless (cl-find-if
+             (lambda (b) (equal (elbkm-bookmark-id b) id))
+             bookmarks)
+      (error "no bookmark with id %s" id))
+    (let ((replaced
+           (cl-mapcar
+            (lambda (b)
+              (if (equal (elbkm-bookmark-id b) id) bm b))
+            bookmarks)))
+      (elbkm-storage--write replaced)
+      bm)))
+
 (provide 'elbkm-storage)
 ;;; elbkm-storage.el ends here
