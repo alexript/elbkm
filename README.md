@@ -39,7 +39,7 @@ Add the directory to `load-path` and load the package:
 
 ```elisp
 (use-package elbkm
-  :straight (elbkm :type git :host github :repo "your-name/elbkm"))
+  :straight (elbkm :type git :host github :repo "alexript/elbkm"))
 ```
 
 The three commands are autoloaded, so you can call `M-x elbkm-add`,
