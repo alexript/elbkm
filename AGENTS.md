@@ -72,10 +72,22 @@ Interactive commands (autoloaded):
 
 | Command | Args | Behavior |
 |---|---|---|
-| `elbkm-add` | `&optional url title description tags` | Prompt for nil args (validated loop); create + persist bookmark. |
+| `elbkm-add` | `&optional url title description tags` | Prompt for nil args (validated loop); create + persist bookmark; run `elbkm-after-add-functions`. |
 | `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. |
-| `elbkm-delete` | `&optional tags` | Filter, select, confirm with `y-or-n-p`, delete. |
+| `elbkm-delete` | `&optional tags` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
 | `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
+
+Hooks (abnormal, see `add-hook`):
+
+- `elbkm-after-add-functions` — list of functions called with the newly
+  created bookmark plist after `elbkm-storage-add` succeeds. Used to
+  react to additions (logging, syncing, notifications, etc.).
+- `elbkm-after-delete-functions` — list of functions called with the
+  deleted bookmark plist after `elbkm-storage-delete` succeeds. Not
+  invoked when the user cancels confirmation.
+
+Both hooks swallow per-function errors via `with-demoted-errors` so a
+faulty hook never breaks the command or the user's workflow.
 
 Design rules to preserve:
 
@@ -117,11 +129,17 @@ emacs --batch --eval \
   '(let ((load-path (append (list "." "tests") load-path)))
      (require (quote elbkm-bookmark-test))
      (require (quote elbkm-storage-test))
+     (require (quote elbkm-commands-test))
      (ert-run-tests-batch-and-exit t))'
 ```
 
 When changing the domain or storage layers, **run both** — the storage tests
 exercise `elbkm-bookmark-reconstitute` on real JSON round-trips.
+When changing `elbkm.el` commands or hooks, also run the
+`elbkm-commands-test` suite — it covers the `elbkm-after-add-functions`
+and `elbkm-after-delete-functions` hooks end-to-end, and is the home
+for any future command-level tests (search variants, `elbkm-open-function`,
+org-capture integration, etc.).
 
 There is no Makefile or CI; the commands above are the canonical check.
 
@@ -135,7 +153,8 @@ There is no Makefile or CI; the commands above are the canonical check.
 - `should-error` is used where the Go tests check for a returned error.
 - When adding a domain rule, add a corresponding ERT case in
   `tests/elbkm-bookmark-test.el`; when changing storage behavior, add a case in
-  `tests/elbkm-storage-test.el`.
+  `tests/elbkm-storage-test.el`; when changing `elbkm.el` command or hook
+  behavior, add a case in `tests/elbkm-commands-test.el`.
 
 ## Things to avoid
 

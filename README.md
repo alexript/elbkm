@@ -24,6 +24,8 @@ with any completion framework (Icomplete/Fido, Vertico, Ivy, Helm, Selectrum,
 - Delete bookmarks with a confirmation prompt
 - Filter candidates by tags
 - Registers an `org-capture` template under key `b` when `org-capture` is loaded
+- Pluggable `elbkm-after-add-functions` and `elbkm-after-delete-functions`
+  hooks for reacting to successful add/delete events
 
 ## Installation
 
@@ -143,6 +145,8 @@ M-x elbkm-register-org-capture-template
 | `elbkm-storage-file-path` | XDG default    | Path to the bookmarks JSON file                              |
 | `elbkm-open-function`     | `browse-url`   | Function called with a URL to open a bookmark                |
 | `elbkm-history`           | `nil`          | Minibuffer history shared by `elbkm-add`, `-search`, `-delete` |
+| `elbkm-after-add-functions`    | `nil`     | Abnormal hook run after a successful add (see [Hooks](#hooks))    |
+| `elbkm-after-delete-functions` | `nil`     | Abnormal hook run after a successful delete (see [Hooks](#hooks)) |
 
 `elbkm-storage-file-path` defaults to
 `$XDG_DATA_HOME/elbkm/bookmarks.json` (or
@@ -165,6 +169,43 @@ Override it to integrate with another tool, e.g.:
 `-search` and `-delete`.  Emacs populates it as you use the commands;
 you usually do not need to touch it.  Customize `history-length` to
 control how many entries are retained.
+
+### Hooks
+
+`elbkm` exposes two abnormal hooks (use the standard `add-hook` /
+`remove-hook` to manage them):
+
+| Hook                              | Fired when                       | Argument                  |
+|-----------------------------------|----------------------------------|---------------------------|
+| `elbkm-after-add-functions`       | `elbkm-add` successfully persists a bookmark | the newly created bookmark plist |
+| `elbkm-after-delete-functions`    | `elbkm-delete` successfully removes a bookmark (after `y-or-n-p` confirmation) | the deleted bookmark plist |
+
+Each function in the hook list is called with the affected bookmark
+plist as its single argument.  Errors raised by a hook are demoted to
+`*Messages*` and do not interrupt the calling command, so a faulty
+hook cannot break `elbkm`.
+
+Example: log every new bookmark via `messages-buffer`:
+
+```elisp
+(add-hook 'elbkm-after-add-functions
+          (lambda (bm)
+            (message "Added bookmark: %s (%s)"
+                     (elbkm-bookmark-title bm)
+                     (elbkm-bookmark-url bm))))
+```
+
+Example: keep a personal audit trail of deletions in a buffer:
+
+```elisp
+(add-hook 'elbkm-after-delete-functions
+          (lambda (bm)
+            (with-current-buffer (get-buffer-create "*elbkm-deleted*")
+              (goto-char (point-max))
+              (insert (format "- %s | %s\n"
+                              (elbkm-bookmark-title bm)
+                              (elbkm-bookmark-url bm))))))
+```
 
 ## Running the tests
 

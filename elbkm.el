@@ -49,6 +49,11 @@
 ;; Bookmarks are stored as JSON under
 ;; `$XDG_DATA_HOME/elbkm/bookmarks.json' (or `~/.local/share/elbkm/bookmarks.json'),
 ;; the same layout used by the original Go tool.
+;;
+;; After a bookmark is successfully added or deleted, every function in
+;; `elbkm-after-add-functions' or `elbkm-after-delete-functions'
+;; (respectively) is invoked with the affected bookmark plist as its
+;; single argument.  These are abnormal hooks: use `add-hook' to register.
 
 ;;; Code:
 
@@ -67,6 +72,22 @@
   "Function called with a URL to open a bookmark.
 Defaults to `browse-url', which respects `browse-url-browser-function'."
   :type 'function)
+
+(defcustom elbkm-after-add-functions nil
+  "Abnormal hook run after a bookmark is successfully added.
+
+Each function is called with one argument: the newly created bookmark
+plist.  Use `add-hook' to register.  Errors in a hook are demoted to
+messages and do not interrupt the user's flow."
+  :type 'hook)
+
+(defcustom elbkm-after-delete-functions nil
+  "Abnormal hook run after a bookmark is successfully deleted.
+
+Each function is called with one argument: the bookmark plist that was
+just removed from storage.  Use `add-hook' to register.  Errors in a hook
+are demoted to messages and do not interrupt the user's flow."
+  :type 'hook)
 
 (defvar elbkm-history nil
   "Minibuffer history for `elbkm' commands.")
@@ -139,6 +160,14 @@ Return the selected bookmark plist, or nil if the user cancelled."
                       with-desc)))
     (message "%s" (mapconcat #'identity with-tags "\n"))))
 
+(defun elbkm--run-hooks-with-bookmark (functions bookmark)
+  "Run each function in FUNCTIONS with BOOKMARK as its single argument.
+Errors raised by a hook are demoted to messages and do not stop later
+hooks or the calling command."
+  (dolist (fn functions)
+    (with-demoted-errors "elbkm hook error: %S"
+      (funcall fn bookmark))))
+
 ;;; Interactive input
 
 (defun elbkm--read-url ()
@@ -210,6 +239,7 @@ Return the newly created bookmark plist."
     (message "Bookmark added: %s — %s"
              (elbkm-bookmark-title bm)
              (elbkm-bookmark-url bm))
+    (elbkm--run-hooks-with-bookmark elbkm-after-add-functions bm)
     bm))
 
 ;;;###autoload
@@ -261,6 +291,7 @@ Return t if a bookmark was deleted, nil otherwise."
      ((y-or-n-p (format "Delete %s? " (elbkm-bookmark-title bm)))
       (elbkm-storage-delete (elbkm-bookmark-id bm))
       (message "Bookmark deleted: %s" (elbkm-bookmark-title bm))
+      (elbkm--run-hooks-with-bookmark elbkm-after-delete-functions bm)
       t)
      (t
       (message "Deletion cancelled.")
