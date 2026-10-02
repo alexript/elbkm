@@ -82,6 +82,7 @@ Interactive commands (autoloaded):
 | `elbkm-search` | `&optional tags` | Filter by tags, `completing-read`, open via `elbkm-open-function`. When `elbkm-use-list-buffer' is non-nil, open the `*elbkm-search*' buffer (RET on an entry opens its URL; `g' reloads). |
 | `elbkm-edit` | `&optional bookmark` | Prompt for a bookmark via `completing-read' (or use BOOKMARK directly), then re-prompt for each field with the current value as the initial input; update in place; run `elbkm-after-edit-functions` on success. |
 | `elbkm-delete` | `&optional tags bookmark` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
+| `elbkm-doctor` | none | Run every function in `elbkm-doctor-functions` (analyze/heal), collect their reports, and show them in the `*elbkm-doctor*` buffer. Errors in a doctor function are caught and displayed so other functions still run. |
 | `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
 
 Hooks (abnormal, see `add-hook`):
@@ -99,11 +100,30 @@ Hooks (abnormal, see `add-hook`):
 All three hooks swallow per-function errors via `with-demoted-errors` so a
 faulty hook never breaks the command or the user's workflow.
 
+Doctor functions (abnormal hook `elbkm-doctor-functions`):
+
+- `elbkm-doctor` runs every function in `elbkm-doctor-functions` to
+  analyze and heal bookmark storage. Each function takes no arguments,
+  may read the current bookmarks via `elbkm-storage-list`, may heal them
+  via the storage operations, and returns a report plist
+  `(:name NAME :message MESSAGE)` (or nil for "nothing to report").
+  If the function removed bookmarks, it should also fire
+  `elbkm-after-delete-functions` for each one so user hooks see the
+  deletions.
+- The default value of `elbkm-doctor-functions` includes
+  `elbkm-doctor-dedup`, which removes duplicate bookmarks (those that
+  share the same URL; the first occurrence in storage order is kept).
+- Errors raised by a doctor function are caught by `elbkm-doctor` and
+  shown in the report buffer, so a faulty function does not prevent the
+  others from running.
+
 User options:
 
 - `elbkm-open-function` — function called with a URL to open it.
 - `elbkm-after-add-functions` / `elbkm-after-edit-functions` /
   `elbkm-after-delete-functions` — hooks.
+- `elbkm-doctor-functions` — abnormal hook of doctor functions (defaults
+  to `(elbkm-doctor-dedup)`).
 - `elbkm-use-list-buffer` — when non-nil, `elbkm-search` opens a
   dedicated `*elbkm-search*` buffer using `tabulated-list-mode` (similar
   to `*Packages*` from `M-x list-packages`).  RET on an entry opens its

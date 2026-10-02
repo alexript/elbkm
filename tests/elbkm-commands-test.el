@@ -511,5 +511,157 @@ preserving the active tag filter."
                             "Alpha edited")))
          (kill-buffer buffer))))))
 
+;;; `elbkm-doctor' and `elbkm-doctor-functions'
+
+(ert-deftest elbkm-commands-test/doctor-functions-default-includes-dedup ()
+  "`elbkm-doctor-functions' registers `elbkm-doctor-dedup' by default."
+  (should (member #'elbkm-doctor-dedup elbkm-doctor-functions)))
+
+(ert-deftest elbkm-commands-test/doctor-dedup-returns-nil-when-no-duplicates ()
+  "`elbkm-doctor-dedup' returns nil when the storage has no duplicates."
+  (let ((bm (elbkm-bookmark-create "https://only.example" "Only" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (should (eq (elbkm-doctor-dedup) nil))
+     (should (= (length (elbkm-storage-list)) 1)))))
+
+(ert-deftest elbkm-commands-test/doctor-dedup-removes-duplicates-by-url ()
+  "`elbkm-doctor-dedup' keeps the first occurrence of each URL and
+removes the rest."
+  (let* ((bm1 (elbkm-bookmark-create "https://a.example" "A first" "" nil))
+         (bm2 (elbkm-bookmark-create "https://b.example" "B" "" nil))
+         (bm3 (elbkm-bookmark-create "https://a.example" "A second" "dup" nil))
+         (bm4 (elbkm-bookmark-create "https://a.example" "A third" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm1)
+     (elbkm-storage-add bm2)
+     (elbkm-storage-add bm3)
+     (elbkm-storage-add bm4)
+     (let ((report (elbkm-doctor-dedup)))
+       (should (consp report))
+       (should (equal (plist-get report :name) "Remove duplicate bookmarks"))
+       (should (string-match-p "Removed 2" (plist-get report :message)))
+       (let ((remaining (elbkm-storage-list)))
+         (should (= (length remaining) 2))
+         (let ((titles (mapcar #'elbkm-bookmark-title remaining))
+               (urls (mapcar #'elbkm-bookmark-url remaining)))
+           (should (member "A first" titles))
+           (should (member "B" titles))
+           (should-not (member "A second" titles))
+           (should-not (member "A third" titles))
+           (should (equal urls (list "https://a.example"
+                                     "https://b.example")))))))))
+
+(ert-deftest elbkm-commands-test/doctor-dedup-fires-after-delete-hooks ()
+  "`elbkm-doctor-dedup' fires `elbkm-after-delete-functions' for every
+removed bookmark."
+  (let* ((bm1 (elbkm-bookmark-create "https://a.example" "A first" "" nil))
+         (bm2 (elbkm-bookmark-create "https://a.example" "A second" "" nil))
+         (deleted nil))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm1)
+     (elbkm-storage-add bm2)
+     (unwind-protect
+         (progn
+           (add-hook 'elbkm-after-delete-functions
+                     (lambda (b) (push (elbkm-bookmark-title b) deleted)))
+           (elbkm-doctor-dedup))
+       (remove-hook 'elbkm-after-delete-functions
+                    (lambda (b) (push (elbkm-bookmark-title b) deleted))))
+     (should (equal deleted (list "A second"))))))
+
+(ert-deftest elbkm-commands-test/doctor-dedup-no-delete-hooks-when-no-dups ()
+  "`elbkm-doctor-dedup' does not call `elbkm-after-delete-functions'
+when there is nothing to remove."
+  (let ((bm (elbkm-bookmark-create "https://only.example" "Only" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (let ((calls 0))
+       (unwind-protect
+           (progn
+             (add-hook 'elbkm-after-delete-functions
+                       (lambda (_) (cl-incf calls)))
+             (elbkm-doctor-dedup))
+         (remove-hook 'elbkm-after-delete-functions
+                      (lambda (_) (cl-incf calls))))
+       (should (= calls 0))))))
+
+(ert-deftest elbkm-commands-test/doctor-runs-every-registered-function ()
+  "`elbkm-doctor' runs every function in `elbkm-doctor-functions' and
+collects their reports."
+  (let ((calls nil))
+    (elbkm-commands-test--with-fresh-storage
+     (unwind-protect
+         (progn
+           (setq elbkm-doctor-functions
+                 (append elbkm-doctor-functions
+                         (list (lambda () (push 'alpha calls)
+                                 (list :name "alpha" :message "ran"))
+                               (lambda () (push 'beta calls)
+                                 (list :name "beta" :message "ran")))))
+           (let ((reports (elbkm-doctor)))
+             (should (= (length calls) 2))
+             (should (member 'alpha calls))
+             (should (member 'beta calls))
+             (should (= (length reports) 2))
+             (let ((names (mapcar (lambda (r) (plist-get r :name)) reports)))
+               (should (member "alpha" names))
+               (should (member "beta" names)))))
+       (setq elbkm-doctor-functions
+             (delq (lambda () (push 'alpha calls)
+                     (list :name "alpha" :message "ran"))
+                   elbkm-doctor-functions))
+       (setq elbkm-doctor-functions
+             (delq (lambda () (push 'beta calls)
+                     (list :name "beta" :message "ran"))
+                   elbkm-doctor-functions))))))
+
+(ert-deftest elbkm-commands-test/doctor-skips-nil-reports ()
+  "Doctor functions that return nil produce no report entry."
+  (elbkm-commands-test--with-fresh-storage
+   (let ((elbkm-doctor-functions (list (lambda () nil))))
+     (let ((reports (elbkm-doctor)))
+       (should (null reports))))))
+
+(ert-deftest elbkm-commands-test/doctor-collects-errors-as-reports ()
+  "An error raised by a doctor function becomes an `:error' report,
+and other doctor functions still run."
+  (let ((later-call nil))
+    (elbkm-commands-test--with-fresh-storage
+     (let ((elbkm-doctor-functions
+            (list (lambda () (error "boom"))
+                  (lambda () (setq later-call t)
+                    (list :name "later" :message "ok")))))
+       (let ((reports (elbkm-doctor)))
+         (should later-call)
+         (should (= (length reports) 2))
+         (let ((errors (cl-remove-if-not
+                        (lambda (r) (plist-get r :error)) reports)))
+           (should (= (length errors) 1))))))))
+
+(defmacro elbkm-commands-test--with-display-buffer-mock (&rest body)
+  "Evaluate BODY with `display-buffer' stubbed (no window side effects).
+The stub returns the buffer object so callers can inspect it."
+  (declare (indent 0) (debug body))
+  `(cl-letf (((symbol-function 'display-buffer)
+              (lambda (buf &rest _) buf)))
+     ,@body))
+
+(ert-deftest elbkm-commands-test/doctor-populates-buffer ()
+  "`elbkm-doctor' writes a human-readable summary into `*elbkm-doctor*'."
+  (let ((bm (elbkm-bookmark-create "https://a.example" "A" "" nil))
+        (bm-dup (elbkm-bookmark-create "https://a.example" "A2" "" nil)))
+    (elbkm-commands-test--with-fresh-storage
+     (elbkm-storage-add bm)
+     (elbkm-storage-add bm-dup)
+     (elbkm-commands-test--with-display-buffer-mock
+       (elbkm-doctor)
+       (with-current-buffer "*elbkm-doctor*"
+         (should (derived-mode-p 'special-mode))
+         (should (string-match-p "elbkm doctor results" (buffer-string)))
+         (should (string-match-p "Remove duplicate bookmarks"
+                                 (buffer-string)))
+         (should (string-match-p "Removed 1 duplicate" (buffer-string))))))))
+
 (provide 'elbkm-commands-test)
 ;;; elbkm-commands-test.el ends here

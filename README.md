@@ -24,6 +24,9 @@ with any completion framework (Icomplete/Fido, Vertico, Ivy, Helm, Selectrum,
 - Edit an existing bookmark's URL, title, description or tags
 - Delete bookmarks with a confirmation prompt
 - Filter candidates by tags
+- Run a `elbkm-doctor` analyze-and-heal pass against the storage,
+  with a built-in `elbkm-doctor-dedup` that removes duplicate bookmarks
+  (those sharing the same URL)
 - Registers an `org-capture` template under key `b` when `org-capture` is loaded
 - Pluggable `elbkm-after-add-functions`, `elbkm-after-edit-functions` and
   `elbkm-after-delete-functions` hooks for reacting to successful add, edit
@@ -164,6 +167,49 @@ buffer binds `e` to `elbkm-edit` for the bookmark at point.  Programmatic
 edits that already have new fields prepared should call
 `elbkm-bookmark-update` and `elbkm-storage-update` directly.
 
+### Doctor (analyze and heal bookmark storage)
+
+```
+M-x elbkm-doctor
+```
+
+Invokes every function in `elbkm-doctor-functions` (an abnormal hook)
+in order, collects their reports, and displays them in the
+read-only `*elbkm-doctor*` buffer (press `q` to bury it).
+
+Each doctor function takes no arguments.  It may read the current
+bookmarks via `elbkm-storage-list` and heal them with the storage
+operations (`elbkm-storage-delete`, `elbkm-storage-update`,
+`elbkm-storage-add`).  A function should return a report plist
+`(:name NAME :message MESSAGE)` (or nil when there was nothing to
+report).  If the function removed bookmarks, it should also fire
+`elbkm-after-delete-functions` for each one so user hooks see the
+deletions.
+
+The default value of `elbkm-doctor-functions` contains
+`elbkm-doctor-dedup`, which removes duplicate bookmarks (those that
+share the same URL; the first occurrence in storage order is kept).
+
+Register your own doctor functions with `add-hook`:
+
+```elisp
+(add-hook 'elbkm-doctor-functions
+          (lambda ()
+            (let ((bookmarks (elbkm-storage-list))
+                  (broken 0))
+              (dolist (bm bookmarks)
+                (unless (string-prefix-p "https://" (elbkm-bookmark-url bm))
+                  (cl-incf broken)))
+              (when (> broken 0)
+                (list :name "Find non-HTTPS bookmarks"
+                      :message (format "Found %d non-HTTPS bookmark(s)."
+                                       broken))))))
+```
+
+Errors raised by a doctor function are caught by `elbkm-doctor` and
+shown in the report buffer, so a faulty function does not prevent the
+others from running.
+
 ### Org-capture integration
 
 When `org-capture` is loaded, `elbkm` automatically registers a template
@@ -188,6 +234,7 @@ M-x elbkm-register-org-capture-template
 | `elbkm-after-add-functions`    | `nil`     | Abnormal hook run after a successful add (see [Hooks](#hooks))    |
 | `elbkm-after-edit-functions`   | `nil`     | Abnormal hook run after a successful edit (see [Hooks](#hooks))   |
 | `elbkm-after-delete-functions` | `nil`     | Abnormal hook run after a successful delete (see [Hooks](#hooks)) |
+| `elbkm-doctor-functions`       | `(elbkm-doctor-dedup)` | Abnormal hook of doctor functions run by `elbkm-doctor` (see [Doctor](#doctor-analyze-and-heal-bookmark-storage)) |
 
 `elbkm-storage-file-path` defaults to
 `$XDG_DATA_HOME/elbkm/bookmarks.json` (or

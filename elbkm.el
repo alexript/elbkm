@@ -38,6 +38,8 @@
 ;;     M-x elbkm-search        Fuzzy-search bookmarks and open one in a browser.
 ;;     M-x elbkm-edit          Edit an existing bookmark's fields.
 ;;     M-x elbkm-delete        Fuzzy-search bookmarks and delete one.
+;;     M-x elbkm-doctor        Analyze storage and run healing functions
+;;                             (defaults to removing duplicate bookmarks).
 ;;
 ;; Each command also accepts arguments when called from Lisp, so they can be
 ;; used non-interactively.  Bookmark selection uses `completing-read', which
@@ -56,6 +58,12 @@
 ;; or `elbkm-after-delete-functions' (respectively) is invoked with the
 ;; affected bookmark plist as its single argument.  These are abnormal
 ;; hooks: use `add-hook' to register.
+;;
+;; `elbkm-doctor' invokes every function in `elbkm-doctor-functions'
+;; (an abnormal hook) to analyze and heal bookmark storage.  The default
+;; value contains `elbkm-doctor-dedup', which removes duplicate bookmarks
+;; (those that share the same URL).  Use `add-hook' to register your own
+;; doctor functions.
 
 ;;; Code:
 
@@ -113,6 +121,32 @@ storage; and `q' buries the window.
 When this option is nil, `elbkm-search' uses `completing-read' as
 before."
   :type 'boolean)
+
+(defcustom elbkm-doctor-functions '(elbkm-doctor-dedup)
+  "Abnormal hook of functions run by `elbkm-doctor'.
+Each function analyzes the bookmarks and may heal the storage.  The
+default value contains `elbkm-doctor-dedup', which removes duplicate
+bookmarks (those that share the same URL).
+
+A doctor function takes no arguments.  It may read the current
+bookmarks via `elbkm-storage-list' and heal them with the storage
+operations (`elbkm-storage-delete', `elbkm-storage-update',
+`elbkm-storage-add').  If it removed bookmarks, it should also fire
+`elbkm-after-delete-functions' for each one so user hooks see the
+deletions (see `elbkm-doctor-dedup' for an example).
+
+A doctor function should return a report plist, or nil when there was
+nothing to report:
+
+    (:name NAME :message MESSAGE)
+
+NAME is a short human-readable identifier; MESSAGE is a one-line
+summary shown in the `*elbkm-doctor*' buffer.
+
+Errors raised by a doctor function are caught by `elbkm-doctor' and
+shown in the report buffer, so a faulty function cannot prevent the
+others from running.  Use `add-hook' to register."
+  :type 'hook)
 
 (defvar elbkm-history nil
   "Minibuffer history for `elbkm' commands.")
@@ -498,6 +532,102 @@ selection."
                  (elbkm-bookmark-url updated))
         (elbkm--run-hooks-with-bookmark elbkm-after-edit-functions updated)
         updated))))
+
+;;; Doctor (analyze and heal bookmark storage)
+
+(defun elbkm-doctor-dedup ()
+  "Remove duplicate bookmarks from storage.
+Two bookmarks are considered duplicates when they share the same URL.
+The first occurrence of each URL (in storage order) is kept; the rest
+are removed.
+
+Each removed bookmark is reported via `elbkm-after-delete-functions'
+so user hooks observe the deletions.
+
+Return a doctor report plist \(:name NAME :message MESSAGE\), or nil
+when no duplicates were found."
+  (let* ((bookmarks (elbkm-storage-list))
+         (seen (make-hash-table :test #'equal))
+         (kept nil)
+         (removed nil))
+    (dolist (bm bookmarks)
+      (let ((url (elbkm-bookmark-url bm)))
+        (if (gethash url seen)
+            (push bm removed)
+          (puthash url t seen)
+          (push bm kept))))
+    (when removed
+      (elbkm-storage--write (nreverse kept))
+      (dolist (bm removed)
+        (elbkm--run-hooks-with-bookmark
+         elbkm-after-delete-functions bm))
+      (list :name "Remove duplicate bookmarks"
+            :message (format "Removed %d duplicate bookmark(s)."
+                             (length removed))))))
+
+(defun elbkm-doctor--format-reports (reports)
+  "Format a list of doctor REPORTS as a plain-text summary.
+Each report is a plist (:name NAME :message MESSAGE), optionally
+with :error set to a string.  Returns a multi-line string."
+  (if (null reports)
+      "No issues found.\n"
+    (with-temp-buffer
+      (insert "elbkm doctor results\n")
+      (insert "=====================\n\n")
+      (dolist (r reports)
+        (let ((name (plist-get r :name))
+              (message (plist-get r :message))
+              (err (plist-get r :error)))
+          (if err
+              (progn
+                (insert (propertize "ERROR " 'face 'error) name "\n")
+                (insert "  " err "\n\n"))
+            (insert (propertize "OK    " 'face 'success) name "\n")
+            (insert "  " (or message "") "\n\n"))))
+      (buffer-string))))
+
+;;;###autoload
+(defun elbkm-doctor ()
+  "Analyze bookmark storage and run healing actions.
+Interactively, invokes every function in `elbkm-doctor-functions'
+in order, collects their reports, and displays a summary in the
+`*elbkm-doctor*' buffer.  The buffer is read-only; press `q' to
+bury it.
+
+Each function in `elbkm-doctor-functions' is called with no arguments
+and may inspect and heal the storage.  Errors raised by a doctor
+function are caught and shown in the report buffer so a faulty
+function cannot prevent the others from running.
+
+Return the list of reports (each either a `(:name ... :message ...)'
+plist or a `(:name ... :error ...)' plist on failure)."
+  (interactive)
+  (let ((reports nil))
+    (dolist (fn elbkm-doctor-functions)
+      (let ((report
+             (condition-case err
+                 (funcall fn)
+               (error
+                (list :name (elbkm-doctor--function-name fn)
+                      :error (format "%S" err))))))
+        (when report
+          (push report reports))))
+    (setq reports (nreverse reports))
+    (let ((buf (get-buffer-create "*elbkm-doctor*")))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (elbkm-doctor--format-reports reports))
+          (goto-char (point-min))
+          (special-mode)))
+      (display-buffer buf))
+    reports))
+
+(defun elbkm-doctor--function-name (fn)
+  "Return a human-readable name for the doctor function FN."
+  (cond
+   ((symbolp fn) (symbol-name fn))
+   (t (format "%S" fn))))
 
 ;;; Org-capture integration
 
