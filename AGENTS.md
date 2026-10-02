@@ -83,7 +83,7 @@ Interactive commands (autoloaded):
 | `elbkm-edit` | `&optional bookmark` | Prompt for a bookmark via `completing-read' (or use BOOKMARK directly), then re-prompt for each field with the current value as the initial input; update in place; run `elbkm-after-edit-functions` on success. |
 | `elbkm-delete` | `&optional tags bookmark` | Filter, select, confirm with `y-or-n-p`, delete; run `elbkm-after-delete-functions` on success. |
 | `elbkm-doctor` | none | Run every function in `elbkm-doctor-functions` (analyze/heal), collect their reports, and show them in the `*elbkm-doctor*` buffer. Errors in a doctor function are caught and displayed so other functions still run. |
-| `elbkm-register-org-capture-template` | none | Add a key-`"b"` entry to `org-capture-templates` that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
+| `elbkm-register-org-capture-template` | none | Add an entry to `org-capture-templates` (key from `elbkm-org-capture-key`, default `"b"`) that calls `elbkm-add`. Invoked automatically via `with-eval-after-load 'org-capture`; safe to call manually. |
 
 Hooks (abnormal, see `add-hook`):
 
@@ -131,6 +131,10 @@ User options:
   `d` deletes the entry at point after confirmation; `g` reloads from
   storage; `q` buries the window.  When nil, `elbkm-search` falls back to
   `completing-read`.
+- `elbkm-org-capture-key` — key used for the `elbkm` entry registered
+  in `org-capture-templates` by `elbkm-register-org-capture-template`.
+  Default `"b"`; change it to any single-character key to avoid clashing
+  with your own templates.
 
 Design rules to preserve:
 

@@ -27,7 +27,7 @@ with any completion framework (Icomplete/Fido, Vertico, Ivy, Helm, Selectrum,
 - Run a `elbkm-doctor` analyze-and-heal pass against the storage,
   with a built-in `elbkm-doctor-dedup` that removes duplicate bookmarks
   (those sharing the same URL)
-- Registers an `org-capture` template under key `b` when `org-capture` is loaded
+- Registers an `org-capture` template under `elbkm-org-capture-key` (default `b`) when `org-capture` is loaded
 - Pluggable `elbkm-after-add-functions`, `elbkm-after-edit-functions` and
   `elbkm-after-delete-functions` hooks for reacting to successful add, edit
   and delete events
@@ -213,9 +213,16 @@ others from running.
 ### Org-capture integration
 
 When `org-capture` is loaded, `elbkm` automatically registers a template
-under key `b`.  Selecting `b` from `org-capture` runs `elbkm-add`
-interactively and finalizes immediately without inserting anything into
-the capture target.
+under the key from `elbkm-org-capture-key` (default `b`).  Selecting that
+key from `org-capture` runs `elbkm-add` interactively and finalizes
+immediately without inserting anything into the capture target.
+
+To use a different key (for example, to avoid clashing with your own
+templates), customize the option before `org-capture` loads:
+
+```elisp
+(setq elbkm-org-capture-key "k")
+```
 
 To register it manually (for example after customizing
 `org-capture-templates`), call:
@@ -231,6 +238,7 @@ M-x elbkm-register-org-capture-template
 | `elbkm-storage-file-path` | XDG default    | Path to the bookmarks JSON file                              |
 | `elbkm-open-function`     | `browse-url`   | Function called with a URL to open a bookmark                |
 | `elbkm-history`           | `nil`          | Minibuffer history shared by `elbkm-add`, `-search`, `-edit`, `-delete` |
+| `elbkm-org-capture-key`   | `"b"`          | Key used for the `elbkm` entry in `org-capture-templates` (see [Org-capture integration](#org-capture-integration)) |
 | `elbkm-after-add-functions`    | `nil`     | Abnormal hook run after a successful add (see [Hooks](#hooks))    |
 | `elbkm-after-edit-functions`   | `nil`     | Abnormal hook run after a successful edit (see [Hooks](#hooks))   |
 | `elbkm-after-delete-functions` | `nil`     | Abnormal hook run after a successful delete (see [Hooks](#hooks)) |

@@ -663,5 +663,84 @@ The stub returns the buffer object so callers can inspect it."
                                  (buffer-string)))
          (should (string-match-p "Removed 1 duplicate" (buffer-string))))))))
 
+;;; `elbkm-org-capture-key' / `elbkm-register-org-capture-template'
+
+;; Declared in `org-capture' (loaded lazily by elbkm); tell the byte-compiler
+;; and let ERT bind it without `void-variable' errors.
+(defvar org-capture-templates)
+
+(defvar elbkm-commands-test--orig-org-capture-key
+  elbkm-org-capture-key
+  "Snapshot of `elbkm-org-capture-key' used to restore its value after tests.")
+
+(defun elbkm-commands-test--capture-template (key)
+  "Return the `org-capture' template registered for KEY, or nil.
+`add-to-list' prepends by default, so the most recently registered
+template for KEY sits at the head of the resulting list of matches."
+  (let ((matches (cl-remove-if-not
+                  (lambda (entry) (and (consp entry)
+                                       (string= (car entry) key)))
+                  org-capture-templates)))
+    (car matches)))
+
+(ert-deftest elbkm-commands-test/org-capture-key-defaults-to-b ()
+  "`elbkm-org-capture-key' defaults to \"b\"."
+  (should (string= elbkm-org-capture-key "b")))
+
+(ert-deftest elbkm-commands-test/register-org-capture-template-uses-key ()
+  "`elbkm-register-org-capture-template' uses `elbkm-org-capture-key'."
+  (let ((elbkm-org-capture-key "k")
+        (org-capture-templates nil))
+    (unwind-protect
+        (progn
+          (elbkm-register-org-capture-template)
+          (let ((tmpl (elbkm-commands-test--capture-template "k")))
+            (should (consp tmpl))
+            (should (string= (nth 1 tmpl) "Bookmark"))
+            (should (string= (nth 4 tmpl) "%(elbkm--org-capture-add)"))
+            (should (eq (plist-get (nthcdr 5 tmpl) :immediate-finish) t))))
+      (setq elbkm-org-capture-key elbkm-commands-test--orig-org-capture-key))))
+
+(ert-deftest elbkm-commands-test/register-org-capture-template-defaults-b ()
+  "With the default key, `elbkm-register-org-capture-template' registers \"b\"."
+  (let ((org-capture-templates nil))
+    (unwind-protect
+        (progn
+          (elbkm-register-org-capture-template)
+          (should (consp (elbkm-commands-test--capture-template "b"))))
+      (setq elbkm-org-capture-key elbkm-commands-test--orig-org-capture-key))))
+
+(ert-deftest elbkm-commands-test/register-org-capture-template-respects-key-change ()
+  "Re-registering after changing the key drops the old key and uses the new one."
+  (let ((org-capture-templates nil))
+    (unwind-protect
+        (progn
+          (setq elbkm-org-capture-key "b")
+          (elbkm-register-org-capture-template)
+          (should (consp (elbkm-commands-test--capture-template "b")))
+          (setq elbkm-org-capture-key "z")
+          (elbkm-register-org-capture-template)
+          (should (consp (elbkm-commands-test--capture-template "z")))
+          (let ((matches (cl-remove-if-not
+                          (lambda (e) (and (consp e)
+                                           (member (car e) '("b" "z"))))
+                          org-capture-templates)))
+            ;; Both keys present, but the most recent registration ("z") is
+            ;; at the head of the list because `add-to-list' prepends.
+            (should (= (length matches) 2))
+            (should (string= (caar matches) "z"))))
+      (setq elbkm-org-capture-key elbkm-commands-test--orig-org-capture-key))))
+
+(ert-deftest elbkm-commands-test/register-org-capture-template-trims-key ()
+  "Leading/trailing whitespace in `elbkm-org-capture-key' is trimmed."
+  (let ((elbkm-org-capture-key "  m  ")
+        (org-capture-templates nil))
+    (unwind-protect
+        (progn
+          (elbkm-register-org-capture-template)
+          (should (consp (elbkm-commands-test--capture-template "m")))
+          (should (null (elbkm-commands-test--capture-template "  m  "))))
+      (setq elbkm-org-capture-key elbkm-commands-test--orig-org-capture-key))))
+
 (provide 'elbkm-commands-test)
 ;;; elbkm-commands-test.el ends here

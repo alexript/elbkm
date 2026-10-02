@@ -110,6 +110,13 @@ that replaced the previous one in storage.  The plist has the same
 not interrupt the user's flow."
   :type 'hook)
 
+(defcustom elbkm-org-capture-key "b"
+  "Key used for the `elbkm' entry in `org-capture-templates'.
+Selecting this key from `org-capture' runs `elbkm-add' interactively.
+The default \"b\" keeps the historical shortcut; change it to any
+other single-character key to avoid clashing with your own templates."
+  :type 'string)
+
 (defcustom elbkm-use-list-buffer nil
   "When non-nil, `elbkm-search' shows results in a dedicated buffer.
 The buffer, named `*elbkm-search*', uses `tabulated-list-mode' so it
@@ -648,17 +655,20 @@ without ever showing the buffer to the user."
 (defun elbkm-register-org-capture-template ()
   "Register an `org-capture' template that adds a bookmark via `elbkm-add'.
 
-The template uses key \"b\" and description \"Bookmark\".  It invokes
-`elbkm--org-capture-add' and is finalized immediately, so selecting \"b\"
-from `org-capture' simply runs `elbkm-add' interactively.
+The template uses the key from `elbkm-org-capture-key' (default \"b\")
+and description \"Bookmark\".  It invokes `elbkm--org-capture-add'
+and is finalized immediately, so selecting the configured key from
+`org-capture' simply runs `elbkm-add' interactively.
 
 This is called automatically when `org-capture' is loaded (see
 `with-eval-after-load' below), but it is exposed as a public command so
-users can call it manually after customizing `org-capture-templates'."
-  (add-to-list 'org-capture-templates
-               '("b" "Bookmark" plain (file "")
-                 "%(elbkm--org-capture-add)"
-                 :immediate-finish t)))
+users can call it manually after customizing `org-capture-templates' or
+after changing `elbkm-org-capture-key'."
+  (let ((key (string-trim (format "%s" elbkm-org-capture-key))))
+    (add-to-list 'org-capture-templates
+                 `(,key "Bookmark" plain (file "")
+                        "%(elbkm--org-capture-add)"
+                        :immediate-finish t))))
 
 ;;;###autoload
 (with-eval-after-load 'org-capture
