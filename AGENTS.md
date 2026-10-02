@@ -168,12 +168,7 @@ emacs --batch --eval \
      (byte-compile-file "elbkm.el"))'
 
 # Run the ERT suite (must be all green)
-emacs --batch --eval \
-  '(let ((load-path (append (list "." "tests") load-path)))
-     (require (quote elbkm-bookmark-test))
-     (require (quote elbkm-storage-test))
-     (require (quote elbkm-commands-test))
-     (ert-run-tests-batch-and-exit t))'
+emacs --batch -l tests/elbkm-tests.el
 ```
 
 When changing the domain or storage layers, **run both** — the storage tests

@@ -312,12 +312,7 @@ Example: log the previous and new URL whenever a bookmark is edited:
 ## Running the tests
 
 ```sh
-emacs --batch --eval \
-  '(let ((load-path (append (list "." "tests") load-path)))
-     (require (quote elbkm-bookmark-test))
-     (require (quote elbkm-storage-test))
-     (require (quote elbkm-commands-test))
-     (ert-run-tests-batch-and-exit t))'
+emacs --batch -l tests/elbkm-tests.el
 ```
 
 ## Acknowledgments
